@@ -1,5 +1,6 @@
 import { Routes, Route, Link } from 'react-router-dom'
 import './style.css'
+import Dashboard from './Dashboard'
 
 function Home() {
   return (
@@ -26,7 +27,7 @@ function App() {
         {/*sign in/sign up page at start*/}
         <Route path="/" element={<Home />} />
         {/*dashboard page*/}
-        <Route path="/dashboard" element={<About />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         {/*create post page*/}
         <Route path="/create-post" element={<About />} />
         {/*profile page*/}
