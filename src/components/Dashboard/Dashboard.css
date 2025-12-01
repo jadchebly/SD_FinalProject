@@ -1,0 +1,10 @@
+.dashboard-container {
+  min-height: 100vh;
+}
+
+.dashboard-content {
+  padding-top: 90px;
+  padding-left: 40px;
+  padding-right: 40px;
+}
+

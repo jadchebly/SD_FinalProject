@@ -1,6 +1,7 @@
-import { Routes, Route, Link } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import './style.css'
-import Dashboard from './Dashboard'
+import Dashboard from './components/Dashboard/Dashboard'
+import Navbar from './components/Dashboard/Navbar/Navbar'
 
 function Home() {
   return (
@@ -11,11 +12,32 @@ function Home() {
   )
 }
 
-function About() {
+function SignUp() {
   return (
     <div>
-      <h1>About</h1>
-      <p>This is the about page.</p>
+      <h1>Sign Up</h1>
+      <p>This is the sign up page.</p>
+    </div>
+  )
+}
+
+function CreatePost() {
+  return (
+    <div>
+      <Navbar />
+      <div style={{ paddingTop: '90px', paddingLeft: '40px', paddingRight: '40px' }}>
+        <h1>Create Post</h1>
+        <p>This is the create post page.</p>
+      </div>
+    </div>
+  )
+}
+
+function Profile() {
+  return (
+    <div>
+      <h1>Profile</h1>
+      <p>This is the profile page.</p>
     </div>
   )
 }
@@ -29,11 +51,11 @@ function App() {
         {/*dashboard page*/}
         <Route path="/dashboard" element={<Dashboard />} />
         {/*create post page*/}
-        <Route path="/create-post" element={<About />} />
+        <Route path="/create-post" element={<CreatePost />} />
         {/*profile page*/}
-        <Route path="/profile" element={<About />} />
+        <Route path="/profile" element={<Profile />} />
         {/*sign up page*/}
-        <Route path="/signup" element={<About />} />
+        <Route path="/signup" element={<SignUp />} />
       </Routes>
     </div>
   )
