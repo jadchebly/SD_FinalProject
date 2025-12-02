@@ -125,6 +125,13 @@
   .top-navbar-links .avatar:hover svg {
     opacity: 1;
   }
+
+  .navbar-avatar-img {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
   
   .top-navbar-links a svg[class*="text-blue"] {
     color: #0066ff;

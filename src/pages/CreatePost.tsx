@@ -3,9 +3,11 @@ import "./CreatePost.css";
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Post } from "../types/Post";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function CreatePost() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [type, setType] = useState("blurb");
@@ -273,6 +275,11 @@ export default function CreatePost() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!user) {
+      alert("You must be logged in to create a post.");
+      return;
+    }
+
     const newPost: Post = {
       id: crypto.randomUUID(),
       title,
@@ -282,7 +289,7 @@ export default function CreatePost() {
       videoLink: videoLink || undefined,
       recordedVideo: recordedVideo || undefined,
       createdAt: new Date().toISOString(),
-      user: "user", // TODO: Replace with actual user from auth
+      user: user.username,
     };
 
     // Get existing posts from localStorage
