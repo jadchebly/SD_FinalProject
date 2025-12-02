@@ -1,11 +1,15 @@
 import Navbar from "../components/Dashboard/Navbar/Navbar";
 import "./CreatePost.css";
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import type { Post } from "../types/Post";
 
 export default function CreatePost() {
+  const navigate = useNavigate();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [type, setType] = useState("blurb");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const [image, setImage] = useState("");
   const [videoLink, setVideoLink] = useState("");
@@ -81,9 +85,44 @@ export default function CreatePost() {
 
 
   /* ------------------------------------
+     COMPRESS IMAGE
+  ------------------------------------ */
+  const compressImage = (dataUrl: string, maxWidth: number = 1920, quality: number = 0.8): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL("image/jpeg", quality);
+        resolve(compressed);
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
+  /* ------------------------------------
      CAPTURE PHOTO
   ------------------------------------ */
-  const capturePhoto = () => {
+  const capturePhoto = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
@@ -98,7 +137,9 @@ export default function CreatePost() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const photo = canvas.toDataURL("image/png");
-    setImage(photo);
+    // Compress the image
+    const compressedPhoto = await compressImage(photo);
+    setImage(compressedPhoto);
 
     stopCamera();
   };
@@ -175,7 +216,7 @@ export default function CreatePost() {
   /* ------------------------------------
      FILE UPLOAD / DRAG & DROP
   ------------------------------------ */
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       alert("Only image files are supported for upload.");
@@ -183,8 +224,11 @@ export default function CreatePost() {
     }
 
     const reader = new FileReader();
-    reader.onload = () => {
-      setImage(reader.result as string);
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      // Compress the uploaded image
+      const compressedImage = await compressImage(dataUrl);
+      setImage(compressedImage);
       setType("photo");
     };
     reader.readAsDataURL(file);
@@ -226,21 +270,97 @@ export default function CreatePost() {
   /* ------------------------------------
      SUBMIT POST
   ------------------------------------ */
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const newPost = {
+    const newPost: Post = {
       id: crypto.randomUUID(),
       title,
       content,
-      type,
-      image: image || null,
-      videoLink: recordedVideo || videoLink || null,
-      createdAt: new Date(),
+      type: type as "blurb" | "photo" | "video",
+      image: image || undefined,
+      videoLink: videoLink || undefined,
+      recordedVideo: recordedVideo || undefined,
+      createdAt: new Date().toISOString(),
+      user: "user", // TODO: Replace with actual user from auth
     };
 
-    console.log(newPost);
-    alert("Post submitted! (Check console)");
+    // Get existing posts from localStorage
+    const existingPosts = localStorage.getItem("posts");
+    let posts: Post[] = existingPosts ? JSON.parse(existingPosts) : [];
+    
+    // Compress image if present
+    let finalPost = { ...newPost };
+    if (finalPost.image) {
+      try {
+        finalPost.image = await compressImage(finalPost.image, 1920, 0.7);
+      } catch (error) {
+        console.error("Error compressing image:", error);
+      }
+    }
+    
+    // Add new post
+    posts.push(finalPost);
+    
+    // Keep only the most recent 50 posts to prevent quota exceeded
+    if (posts.length > 50) {
+      posts = posts
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 50);
+    }
+    
+    // Save back to localStorage with error handling
+    try {
+      const postsJson = JSON.stringify(posts);
+      // Check if data is too large (rough estimate: 4MB limit for safety)
+      if (postsJson.length > 4 * 1024 * 1024) {
+        // If too large, remove oldest posts
+        const sortedPosts = posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        let reducedPosts = sortedPosts;
+        while (JSON.stringify(reducedPosts).length > 3 * 1024 * 1024 && reducedPosts.length > 1) {
+          reducedPosts = reducedPosts.slice(0, -1);
+        }
+        localStorage.setItem("posts", JSON.stringify(reducedPosts));
+        alert("Storage limit reached. Some older posts were removed to make space.");
+      } else {
+        localStorage.setItem("posts", postsJson);
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "QuotaExceededError") {
+        // Remove oldest posts and try again
+        const sortedPosts = posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        let reducedPosts = sortedPosts.slice(0, Math.floor(sortedPosts.length * 0.8));
+        try {
+          localStorage.setItem("posts", JSON.stringify(reducedPosts));
+          alert("Storage limit reached. Some older posts were removed. Please try submitting again.");
+        } catch (retryError) {
+          alert("Storage is full. Please clear some posts or use a different browser.");
+          return;
+        }
+      } else {
+        console.error("Error saving post:", error);
+        alert("Error saving post. Please try again.");
+        return;
+      }
+    }
+
+    // Reset form
+    setTitle("");
+    setContent("");
+    setImage("");
+    setVideoLink("");
+    setRecordedVideo(null);
+    setType("blurb");
+
+    // Show success modal
+    setShowSuccessModal(true);
+  };
+
+  const handleSuccessOk = () => {
+    setShowSuccessModal(false);
+    navigate("/dashboard");
+    // Scroll to top of page
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const removePreview = () => {
@@ -325,15 +445,17 @@ export default function CreatePost() {
                 />
 
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button
-                    type="button"
-                    className="capture-btn"
-                    onClick={capturePhoto}
-                  >
-                    Capture Photo
-                  </button>
+                  {type !== "video" && (
+                    <button
+                      type="button"
+                      className="capture-btn"
+                      onClick={capturePhoto}
+                    >
+                      Capture Photo
+                    </button>
+                  )}
 
-                  {!recording && (
+                  {type !== "photo" && !recording && (
                     <button
                       type="button"
                       className="camera-btn"
@@ -343,7 +465,7 @@ export default function CreatePost() {
                     </button>
                   )}
 
-                  {recording && (
+                  {type !== "photo" && recording && (
                     <button
                       type="button"
                       className="stop-camera-btn"
@@ -368,12 +490,34 @@ export default function CreatePost() {
           {/* PREVIEW (image or recorded video) */}
           {recordedVideo ? (
             <div className="preview-box">
-              <button className="preview-close" onClick={removePreview} aria-label="Remove preview">×</button>
+              <button 
+                type="button"
+                className="preview-close" 
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  removePreview();
+                }} 
+                aria-label="Remove preview"
+              >
+                ×
+              </button>
               <video src={recordedVideo} controls className="video-preview" />
             </div>
           ) : image ? (
             <div className="preview-box">
-              <button className="preview-close" onClick={removePreview} aria-label="Remove preview">×</button>
+              <button 
+                type="button"
+                className="preview-close" 
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  removePreview();
+                }} 
+                aria-label="Remove preview"
+              >
+                ×
+              </button>
               <img src={image} alt="Captured" className="preview-image" />
             </div>
           ) : null}
@@ -421,6 +565,23 @@ export default function CreatePost() {
       </div>
 
       <canvas ref={canvasRef} style={{ display: "none" }} />
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="success-modal-overlay" onClick={handleSuccessOk}>
+          <div className="success-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="success-modal-body">
+              <h2 className="success-modal-title">Post Successful</h2>
+              <p className="success-modal-message">Your post has been created successfully!</p>
+            </div>
+            <div className="success-modal-footer">
+              <button className="success-modal-btn" onClick={handleSuccessOk}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
