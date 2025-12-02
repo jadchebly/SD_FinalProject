@@ -3,11 +3,13 @@ import { AiFillPlusCircle } from "react-icons/ai";
 import { IoHome } from "react-icons/io5";
 import { IoArrowBack } from "react-icons/io5";
 import { GiEgyptianProfile } from "react-icons/gi";
+import { useAuth } from "../../../contexts/AuthContext";
 import "./Navbar.css"; 
 
 export default function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const isCreatePost = location.pathname === "/create-post";
 
   const handleBack = () => {
@@ -51,6 +53,9 @@ export default function Navbar() {
               <GiEgyptianProfile size={24} />
             </Link>
           </div>
+          {user && (
+            <span className="username-display">{user.username}</span>
+          )}
         </div>
       </div>
     </div>  

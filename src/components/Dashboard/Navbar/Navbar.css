@@ -134,4 +134,11 @@
   .top-navbar-links a:hover svg[class*="text-blue"] {
     color: #0052cc;
   }
+
+  .username-display {
+    font-size: 14px;
+    color: #1a1a1a;
+    font-weight: 500;
+    opacity: 0.8;
+  }
   

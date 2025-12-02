@@ -1,46 +1,46 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import './style.css'
+import { AuthProvider } from './contexts/AuthContext'
+import ProtectedRoute from './components/ProtectedRoute'
 import Dashboard from './components/Dashboard/Dashboard'
-import CreatePost from "./pages/CreatePost";
-
-function Home() {
-  return (
-    <div>
-      <h1>Home</h1>
-      <p>Welcome to your React Router app!</p>
-    </div>
-  )
-}
-
-function SignUp() {
-  return (
-    <div>
-      <h1>Sign Up</h1>
-      <p>This is the sign up page.</p>
-    </div>
-  )
-}
-
-function Profile() {
-  return (
-    <div>
-      <h1>Profile</h1>
-      <p>This is the profile page.</p>
-    </div>
-  )
-}
+import CreatePost from "./pages/CreatePost"
+import Login from './pages/Login'
+import SignUp from './pages/SignUp'
+import Profile from './pages/Profile'
 
 function App() {
   return (
-    <div>
+    <AuthProvider>
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/create-post" element={<CreatePost />} />
-        <Route path="/profile" element={<Profile />} />
+        <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route 
+          path="/dashboard" 
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/create-post" 
+          element={
+            <ProtectedRoute>
+              <CreatePost />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/profile" 
+          element={
+            <ProtectedRoute>
+              <Profile />
+            </ProtectedRoute>
+          } 
+        />
       </Routes>
-    </div>
+    </AuthProvider>
   )
 }
 
