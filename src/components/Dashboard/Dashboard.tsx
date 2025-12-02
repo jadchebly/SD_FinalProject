@@ -4,24 +4,40 @@ import { useState, useEffect } from "react";
 import type { Post, Comment } from "../../types/Post";
 import { AiFillLike } from "react-icons/ai";
 import { GiEgyptianProfile } from "react-icons/gi";
+import { useAuth } from "../../contexts/AuthContext";
+import { FiEdit2 } from "react-icons/fi";
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
   const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [commentInputs, setCommentInputs] = useState<{ [postId: string]: string }>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [editFormData, setEditFormData] = useState({ title: "", content: "", videoLink: "" });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
 
-  // Filter posts based on search query
+  // Filter posts based on current user and search query
   useEffect(() => {
     const filterPosts = () => {
+      if (!user) {
+        setFilteredPosts([]);
+        return;
+      }
+
+      // First filter by current user
+      let userPosts = posts.filter((post) => post.user === user.username);
+      
+      // Then filter by search query if present
       const query = localStorage.getItem("searchQuery") || "";
       setSearchQuery(query);
       
       if (!query.trim()) {
-        setFilteredPosts(posts);
+        setFilteredPosts(userPosts);
       } else {
-        const filtered = posts.filter((post) =>
+        const filtered = userPosts.filter((post) =>
           post.title.toLowerCase().includes(query.toLowerCase())
         );
         setFilteredPosts(filtered);
@@ -29,18 +45,26 @@ export default function Dashboard() {
     };
 
     filterPosts();
-  }, [posts]);
+  }, [posts, user]);
 
   // Listen for search updates from Navbar
   useEffect(() => {
     const handleSearchUpdate = () => {
+      if (!user) {
+        setFilteredPosts([]);
+        return;
+      }
+
+      // First filter by current user
+      let userPosts = posts.filter((post) => post.user === user.username);
+      
       const query = localStorage.getItem("searchQuery") || "";
       setSearchQuery(query);
       
       if (!query.trim()) {
-        setFilteredPosts(posts);
+        setFilteredPosts(userPosts);
       } else {
-        const filtered = posts.filter((post) =>
+        const filtered = userPosts.filter((post) =>
           post.title.toLowerCase().includes(query.toLowerCase())
         );
         setFilteredPosts(filtered);
@@ -49,7 +73,7 @@ export default function Dashboard() {
 
     window.addEventListener("searchUpdate", handleSearchUpdate);
     return () => window.removeEventListener("searchUpdate", handleSearchUpdate);
-  }, [posts]);
+  }, [posts, user]);
 
   // for now, use local storage until we have a backend
   useEffect(() => {
@@ -129,11 +153,16 @@ export default function Dashboard() {
     const commentText = commentInputs[postId]?.trim();
     if (!commentText) return;
 
+    if (!user) {
+      console.error("User not authenticated");
+      return;
+    }
+
     const newComment: Comment = {
       id: crypto.randomUUID(),
       text: commentText,
-      user: "user", // TODO: Replace with actual user from auth, using username
-      userPhoto: undefined, // TODO: Add user photo, using profile picture
+      user: user.username,
+      userPhoto: user.avatar && user.avatar !== 'default' ? user.avatar : undefined,
       createdAt: new Date().toISOString(),
     };
 
@@ -168,6 +197,99 @@ export default function Dashboard() {
 
   const handleCommentInputChange = (postId: string, value: string) => {
     setCommentInputs({ ...commentInputs, [postId]: value });
+  };
+
+  // Get the avatar for a comment - use current user's avatar if it's their comment
+  const getCommentAvatar = (comment: Comment) => {
+    // If the comment is from the current user, use their current avatar
+    if (user && comment.user === user.username) {
+      if (user.avatar && user.avatar !== 'default') {
+        return user.avatar;
+      }
+      return null; // Return null to show default icon
+    }
+    // Otherwise, use the stored avatar from the comment
+    return comment.userPhoto;
+  };
+
+  const handleEditClick = (e: React.MouseEvent, post: Post) => {
+    e.stopPropagation(); // Prevent opening modal when clicking edit
+    setEditingPost(post);
+    setEditFormData({
+      title: post.title,
+      content: post.content,
+      videoLink: post.videoLink || "",
+    });
+  };
+
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPost) return;
+
+    setPosts((prevPosts) => {
+      const updatedPosts = prevPosts.map((post) => {
+        if (post.id === editingPost.id) {
+          return {
+            ...post,
+            title: editFormData.title,
+            content: editFormData.content,
+            videoLink: editFormData.videoLink || undefined,
+          };
+        }
+        return post;
+      });
+
+      // Update localStorage
+      localStorage.setItem("posts", JSON.stringify(updatedPosts));
+
+      // Update selectedPost if it's the same post
+      if (selectedPost && selectedPost.id === editingPost.id) {
+        const updatedPost = updatedPosts.find(p => p.id === editingPost.id);
+        if (updatedPost) {
+          setSelectedPost(updatedPost);
+        }
+      }
+
+      return updatedPosts;
+    });
+
+    setEditingPost(null);
+    setEditFormData({ title: "", content: "", videoLink: "" });
+  };
+
+  const handleEditCancel = () => {
+    setEditingPost(null);
+    setEditFormData({ title: "", content: "", videoLink: "" });
+    setShowDeleteConfirm(false);
+  };
+
+  const handleDeleteClick = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteConfirm = (confirmed: boolean) => {
+    if (confirmed && editingPost) {
+      // Delete the post
+      setPosts((prevPosts) => {
+        const updatedPosts = prevPosts.filter((post) => post.id !== editingPost.id);
+        localStorage.setItem("posts", JSON.stringify(updatedPosts));
+        return updatedPosts;
+      });
+
+      // Close modals and show success
+      setEditingPost(null);
+      setShowDeleteConfirm(false);
+      setShowDeleteSuccess(true);
+    } else {
+      // User clicked No, just close the confirmation modal
+      setShowDeleteConfirm(false);
+    }
+  };
+
+  const handleDeleteSuccessOk = () => {
+    setShowDeleteSuccess(false);
+    setSelectedPost(null);
+    // Posts are already updated in state, so the dashboard will automatically refresh
   };
 
   const getMediaElement = (post: Post, isModal: boolean = false) => {
@@ -213,20 +335,30 @@ export default function Dashboard() {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setSelectedPost(null);
+        if (showDeleteConfirm) {
+          handleDeleteConfirm(false);
+        } else if (showDeleteSuccess) {
+          handleDeleteSuccessOk();
+        } else if (editingPost) {
+          handleEditCancel();
+        } else if (selectedPost) {
+          setSelectedPost(null);
+        }
       }
     };
 
-    if (selectedPost) {
+    if (selectedPost || editingPost || showDeleteConfirm || showDeleteSuccess) {
       document.addEventListener("keydown", handleEscape);
       document.body.style.overflow = "hidden";
     }
 
     return () => {
       document.removeEventListener("keydown", handleEscape);
-      document.body.style.overflow = "unset";
+      if (!selectedPost && !editingPost && !showDeleteConfirm && !showDeleteSuccess) {
+        document.body.style.overflow = "unset";
+      }
     };
-  }, [selectedPost]);
+  }, [selectedPost, editingPost, showDeleteConfirm, showDeleteSuccess]);
 
   return (
     <div className="dashboard-container">
@@ -234,10 +366,12 @@ export default function Dashboard() {
       <div className="dashboard-content">
         <h1 className="dashboard-title">Dashboard</h1>
         
-        {posts.length === 0 ? (
-          <p className="no-posts">No posts yet. Create your first post!</p>
+        {!user ? (
+          <p className="no-posts">Please log in to view your posts.</p>
         ) : filteredPosts.length === 0 && searchQuery ? (
           <p className="no-posts">No posts found matching "{searchQuery}"</p>
+        ) : filteredPosts.length === 0 ? (
+          <p className="no-posts">No posts yet. Create your first post!</p>
         ) : (
           <div className="posts-container">
             {filteredPosts
@@ -275,6 +409,16 @@ export default function Dashboard() {
                       <AiFillLike className="like-icon" />
                       <span className="like-count">{post.likes || 0}</span>
                     </button>
+                    {user && post.user === user.username && (
+                      <button
+                        className="edit-button"
+                        onClick={(e) => handleEditClick(e, post)}
+                        aria-label="Edit post"
+                      >
+                        <FiEdit2 className="edit-icon" />
+                        Edit
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -323,6 +467,16 @@ export default function Dashboard() {
                   <AiFillLike className="like-icon" />
                   <span className="like-count">{selectedPost.likes || 0}</span>
                 </button>
+                {user && selectedPost.user === user.username && (
+                  <button
+                    className="edit-button"
+                    onClick={(e) => handleEditClick(e, selectedPost)}
+                    aria-label="Edit post"
+                  >
+                    <FiEdit2 className="edit-icon" />
+                    Edit
+                  </button>
+                )}
               </div>
 
               {/* Comments Section in Modal */}
@@ -330,24 +484,27 @@ export default function Dashboard() {
                 {/* Display Comments */}
                 {selectedPost.comments && selectedPost.comments.length > 0 && (
                   <div className="comments-list">
-                    {selectedPost.comments.map((comment) => (
-                      <div key={comment.id} className="comment-item">
-                        <div className="comment-avatar">
-                          {comment.userPhoto ? (
-                            <img src={comment.userPhoto} alt={comment.user} className="comment-photo" />
-                          ) : (
-                            <GiEgyptianProfile size={24} className="comment-icon" />
-                          )}
-                        </div>
-                        <div className="comment-content">
-                          <div className="comment-header">
-                            <span className="comment-username">{comment.user}</span>
-                            <span className="comment-time">{getTimeAgo(comment.createdAt)}</span>
+                    {selectedPost.comments.map((comment) => {
+                      const avatar = getCommentAvatar(comment);
+                      return (
+                        <div key={comment.id} className="comment-item">
+                          <div className="comment-avatar">
+                            {avatar ? (
+                              <img src={avatar} alt={comment.user} className="comment-photo" />
+                            ) : (
+                              <GiEgyptianProfile size={24} className="comment-icon" />
+                            )}
                           </div>
-                          <p className="comment-text">{comment.text}</p>
+                          <div className="comment-content">
+                            <div className="comment-header">
+                              <span className="comment-username">{comment.user}</span>
+                              <span className="comment-time">{getTimeAgo(comment.createdAt)}</span>
+                            </div>
+                            <p className="comment-text">{comment.text}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
@@ -371,6 +528,134 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+          </div>
+        )}
+
+        {/* Edit Post Modal */}
+        {editingPost && (
+          <div 
+            className="post-modal-overlay"
+            onClick={handleEditCancel}
+          >
+            <div 
+              className="edit-modal-content"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button 
+                className="modal-close"
+                onClick={handleEditCancel}
+                aria-label="Close edit modal"
+              >
+                ×
+              </button>
+              
+              <h2 className="edit-modal-title">Edit Post</h2>
+              
+              <form onSubmit={handleEditSubmit} className="edit-form">
+                <div className="edit-form-group">
+                  <label>Title</label>
+                  <input
+                    type="text"
+                    value={editFormData.title}
+                    onChange={(e) => setEditFormData({ ...editFormData, title: e.target.value })}
+                    required
+                    className="edit-input"
+                  />
+                </div>
+                
+                <div className="edit-form-group">
+                  <label>Content</label>
+                  <textarea
+                    value={editFormData.content}
+                    onChange={(e) => setEditFormData({ ...editFormData, content: e.target.value })}
+                    required
+                    rows={6}
+                    className="edit-textarea"
+                  />
+                </div>
+                
+                {editingPost.type === "video" && (
+                  <div className="edit-form-group">
+                    <label>YouTube Link (Optional)</label>
+                    <input
+                      type="text"
+                      value={editFormData.videoLink}
+                      onChange={(e) => setEditFormData({ ...editFormData, videoLink: e.target.value })}
+                      placeholder="https://youtube.com/..."
+                      className="edit-input"
+                    />
+                  </div>
+                )}
+                
+                <div className="edit-form-actions">
+                  <button type="button" className="edit-cancel-btn" onClick={handleEditCancel}>
+                    Cancel
+                  </button>
+                  <button type="button" className="edit-delete-btn" onClick={handleDeleteClick}>
+                    Delete
+                  </button>
+                  <button type="submit" className="edit-save-btn">
+                    Save Changes
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteConfirm && editingPost && (
+          <div 
+            className="post-modal-overlay"
+            onClick={() => handleDeleteConfirm(false)}
+          >
+            <div 
+              className="delete-confirm-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="delete-confirm-title">Are you sure?</h3>
+              <p className="delete-confirm-message">This action cannot be undone.</p>
+              <div className="delete-confirm-actions">
+                <button 
+                  type="button" 
+                  className="delete-confirm-no-btn" 
+                  onClick={() => handleDeleteConfirm(false)}
+                >
+                  No
+                </button>
+                <button 
+                  type="button" 
+                  className="delete-confirm-yes-btn" 
+                  onClick={() => handleDeleteConfirm(true)}
+                >
+                  Yes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Success Modal */}
+        {showDeleteSuccess && (
+          <div 
+            className="post-modal-overlay"
+            onClick={handleDeleteSuccessOk}
+          >
+            <div 
+              className="delete-success-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="delete-success-title">Post deleted</h3>
+              <div className="delete-success-actions">
+                <button 
+                  type="button" 
+                  className="delete-success-ok-btn" 
+                  onClick={handleDeleteSuccessOk}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

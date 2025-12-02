@@ -70,7 +70,11 @@ export default function Navbar() {
             className="avatar"
           >
             <Link className="link" to="/profile">
-              <GiEgyptianProfile size={24} />
+              {user && user.avatar && user.avatar !== 'default' ? (
+                <img src={user.avatar} alt="Profile" className="navbar-avatar-img" />
+              ) : (
+                <GiEgyptianProfile size={24} />
+              )}
             </Link>
           </div>
           {user && (
