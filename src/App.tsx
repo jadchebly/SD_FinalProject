@@ -1,7 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import './style.css'
 import Dashboard from './components/Dashboard/Dashboard'
-import Navbar from './components/Dashboard/Navbar/Navbar'
+import CreatePost from "./pages/CreatePost";
 
 function Home() {
   return (
@@ -21,18 +21,6 @@ function SignUp() {
   )
 }
 
-function CreatePost() {
-  return (
-    <div>
-      <Navbar />
-      <div style={{ paddingTop: '90px', paddingLeft: '40px', paddingRight: '40px' }}>
-        <h1>Create Post</h1>
-        <p>This is the create post page.</p>
-      </div>
-    </div>
-  )
-}
-
 function Profile() {
   return (
     <div>
@@ -46,15 +34,10 @@ function App() {
   return (
     <div>
       <Routes>
-        {/*sign in/sign up page at start*/}
         <Route path="/" element={<Home />} />
-        {/*dashboard page*/}
         <Route path="/dashboard" element={<Dashboard />} />
-        {/*create post page*/}
         <Route path="/create-post" element={<CreatePost />} />
-        {/*profile page*/}
         <Route path="/profile" element={<Profile />} />
-        {/*sign up page*/}
         <Route path="/signup" element={<SignUp />} />
       </Routes>
     </div>
@@ -62,4 +45,3 @@ function App() {
 }
 
 export default App
-
