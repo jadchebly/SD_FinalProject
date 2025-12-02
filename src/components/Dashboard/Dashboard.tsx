@@ -12,6 +12,9 @@ export default function Dashboard() {
 
   // for now, use local storage until we have a backend
   useEffect(() => {
+    // Scroll to top when component mounts
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
     const loadPosts = () => {
       const storedPosts = localStorage.getItem("posts");
       if (storedPosts) {
