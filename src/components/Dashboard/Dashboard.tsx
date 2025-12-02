@@ -84,8 +84,10 @@ export default function Dashboard() {
       const storedPosts = localStorage.getItem("posts");
       if (storedPosts) {
         try {
-          const parsedPosts = JSON.parse(storedPosts);
-          setPosts(parsedPosts);
+          const parsedPosts = JSON.parse(storedPosts) as Post[];
+          // Ensure `likers` exists for backward compatibility
+          const normalized = parsedPosts.map(p => ({ ...p, likers: p.likers ?? [] }));
+          setPosts(normalized);
         } catch (error) {
           console.error("Error parsing posts from localStorage:", error);
         }
@@ -121,16 +123,25 @@ export default function Dashboard() {
 
   const handleLike = (e: React.MouseEvent, postId: string) => {
     e.stopPropagation(); // Prevent opening modal when clicking like
-    
+    if (!user) return; // posts are only accessible to signed-in users, so silently return
+
     setPosts((prevPosts) => {
       const updatedPosts = prevPosts.map((post) => {
-        if (post.id === postId) {
-          return {
-            ...post,
-            likes: (post.likes || 0) + 1,
-          };
-        }
-        return post;
+        if (post.id !== postId) return post;
+
+        const likers = post.likers ? [...post.likers] : [];
+        const hasLiked = likers.includes(user.username);
+
+        const nextLikers = hasLiked ? likers.filter(u => u !== user.username) : [...likers, user.username];
+
+        // Keep the legacy `likes` count for compatibility but derive from likers when present
+        const likesCount = nextLikers.length;
+
+        return {
+          ...post,
+          likers: nextLikers,
+          likes: likesCount,
+        };
       });
 
       // Update selectedPost if it's the same post
@@ -365,6 +376,7 @@ export default function Dashboard() {
       <Navbar />
       <div className="dashboard-content">
         <h1 className="dashboard-title">Dashboard</h1>
+  {/* authMessage removed: posts require sign-in so unauthenticated likes shouldn't occur */}
         
         {!user ? (
           <p className="no-posts">Please log in to view your posts.</p>
@@ -401,14 +413,30 @@ export default function Dashboard() {
                   </div>
                   
                   <div className="post-footer">
-                    <button
-                      className="like-button"
-                      onClick={(e) => handleLike(e, post.id)}
-                      aria-label="Like post"
-                    >
-                      <AiFillLike className="like-icon" />
-                      <span className="like-count">{post.likes || 0}</span>
-                    </button>
+                    {(() => {
+                      const hasLiked = !!(user && post.likers?.includes(user.username));
+                      let tooltip = "";
+                      if (post.likers && post.likers.length > 0) {
+                        if (user && post.likers.includes(user.username)) {
+                          tooltip = post.likers.length > 1 ? `You and ${post.likers.length - 1} others` : "You";
+                        } else {
+                          tooltip = post.likers.join(", ");
+                        }
+                      }
+
+                      return (
+                        <button
+                          className={`like-button ${hasLiked ? 'liked' : ''}`}
+                          onClick={(e) => handleLike(e, post.id)}
+                          aria-label="Like post"
+                          aria-pressed={hasLiked}
+                          title={tooltip}
+                        >
+                          <AiFillLike className="like-icon" />
+                          <span className="like-count">{post.likers?.length ?? post.likes ?? 0}</span>
+                        </button>
+                      );
+                    })()}
                     {user && post.user === user.username && (
                       <button
                         className="edit-button"
@@ -459,14 +487,30 @@ export default function Dashboard() {
               </div>
 
               <div className="modal-footer">
-                <button
-                  className="like-button"
-                  onClick={(e) => handleLike(e, selectedPost.id)}
-                  aria-label="Like post"
-                >
-                  <AiFillLike className="like-icon" />
-                  <span className="like-count">{selectedPost.likes || 0}</span>
-                </button>
+                {(() => {
+                  const hasLiked = !!(user && selectedPost.likers?.includes(user.username));
+                  let tooltip = "";
+                  if (selectedPost.likers && selectedPost.likers.length > 0) {
+                    if (user && selectedPost.likers.includes(user.username)) {
+                      tooltip = selectedPost.likers.length > 1 ? `You and ${selectedPost.likers.length - 1} others` : "You";
+                    } else {
+                      tooltip = selectedPost.likers.join(", ");
+                    }
+                  }
+
+                  return (
+                    <button
+                      className={`like-button ${hasLiked ? 'liked' : ''}`}
+                      onClick={(e) => handleLike(e, selectedPost.id)}
+                      aria-label="Like post"
+                      aria-pressed={hasLiked}
+                      title={tooltip}
+                    >
+                      <AiFillLike className="like-icon" />
+                      <span className="like-count">{selectedPost.likers?.length ?? selectedPost.likes ?? 0}</span>
+                    </button>
+                  );
+                })()}
                 {user && selectedPost.user === user.username && (
                   <button
                     className="edit-button"

@@ -17,5 +17,6 @@ export type Post = {
   createdAt: string; // ISO string for localStorage
   user: string;
   likes?: number; // Number of likes
+  likers?: string[]; // user IDs or usernames who liked the post
   comments?: Comment[]; // Array of comments
 };

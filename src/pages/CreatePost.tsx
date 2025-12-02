@@ -290,6 +290,7 @@ export default function CreatePost() {
       recordedVideo: recordedVideo || undefined,
       createdAt: new Date().toISOString(),
       user: user.username,
+      likers: [],
     };
 
     // Get existing posts from localStorage
