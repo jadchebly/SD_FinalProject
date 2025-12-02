@@ -7,8 +7,49 @@ import { GiEgyptianProfile } from "react-icons/gi";
 
 export default function Dashboard() {
   const [posts, setPosts] = useState<Post[]>([]);
+  const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [commentInputs, setCommentInputs] = useState<{ [postId: string]: string }>({});
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Filter posts based on search query
+  useEffect(() => {
+    const filterPosts = () => {
+      const query = localStorage.getItem("searchQuery") || "";
+      setSearchQuery(query);
+      
+      if (!query.trim()) {
+        setFilteredPosts(posts);
+      } else {
+        const filtered = posts.filter((post) =>
+          post.title.toLowerCase().includes(query.toLowerCase())
+        );
+        setFilteredPosts(filtered);
+      }
+    };
+
+    filterPosts();
+  }, [posts]);
+
+  // Listen for search updates from Navbar
+  useEffect(() => {
+    const handleSearchUpdate = () => {
+      const query = localStorage.getItem("searchQuery") || "";
+      setSearchQuery(query);
+      
+      if (!query.trim()) {
+        setFilteredPosts(posts);
+      } else {
+        const filtered = posts.filter((post) =>
+          post.title.toLowerCase().includes(query.toLowerCase())
+        );
+        setFilteredPosts(filtered);
+      }
+    };
+
+    window.addEventListener("searchUpdate", handleSearchUpdate);
+    return () => window.removeEventListener("searchUpdate", handleSearchUpdate);
+  }, [posts]);
 
   // for now, use local storage until we have a backend
   useEffect(() => {
@@ -195,9 +236,11 @@ export default function Dashboard() {
         
         {posts.length === 0 ? (
           <p className="no-posts">No posts yet. Create your first post!</p>
+        ) : filteredPosts.length === 0 && searchQuery ? (
+          <p className="no-posts">No posts found matching "{searchQuery}"</p>
         ) : (
           <div className="posts-container">
-            {posts
+            {filteredPosts
               .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
               .map((post) => (
                 <div 
