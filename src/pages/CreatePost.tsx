@@ -9,6 +9,12 @@ export default function CreatePost() {
 
   const [image, setImage] = useState("");
   const [videoLink, setVideoLink] = useState("");
+  const [recordedVideo, setRecordedVideo] = useState<string | null>(null);
+
+  // recording state
+  const [recording, setRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
   // file upload / drag-drop
   const [dragActive, setDragActive] = useState(false);
@@ -24,8 +30,11 @@ export default function CreatePost() {
   ------------------------------------ */
     const startCamera = async () => {
       try {
+        // Request both video and audio so recordings include microphone audio.
+        // This will prompt the user for microphone permission as well.
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" }
+          video: { facingMode: "user" },
+          audio: true,
         });
 
         // store the stream so capture/stop handlers can access it
@@ -95,6 +104,75 @@ export default function CreatePost() {
   };
 
   /* ------------------------------------
+     RECORD VIDEO
+  ------------------------------------ */
+  const startRecording = () => {
+    const stream = streamRef.current;
+    if (!stream) {
+      alert("Camera not started.");
+      return;
+    }
+
+    // clear previous recordings
+    recordedChunksRef.current = [];
+    setRecordedVideo(null);
+
+    try {
+      const options: MediaRecorderOptions = {};
+      // prefer webm if available
+      if ((MediaRecorder as any).isTypeSupported && (MediaRecorder as any).isTypeSupported("video/webm;codecs=vp9")) {
+        options.mimeType = "video/webm;codecs=vp9";
+      } else if ((MediaRecorder as any).isTypeSupported && (MediaRecorder as any).isTypeSupported("video/webm;codecs=vp8")) {
+        options.mimeType = "video/webm;codecs=vp8";
+      }
+
+      const mr = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = mr;
+
+      mr.ondataavailable = (e: BlobEvent) => {
+        if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+
+      mr.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: recordedChunksRef.current[0]?.type || "video/webm" });
+        const url = URL.createObjectURL(blob);
+        setRecordedVideo(url);
+        setType("video");
+        // stop camera to release resources and show recorded preview
+        stopCamera();
+      };
+
+      mr.start();
+      setRecording(true);
+    } catch (err) {
+      console.error("Recording error:", err);
+      alert("Unable to start recording on this browser.");
+    }
+  };
+
+  const stopRecording = () => {
+    const mr = mediaRecorderRef.current;
+    if (!mr) return;
+    try {
+      mr.stop();
+    } catch (err) {
+      console.error(err);
+    }
+    setRecording(false);
+  };
+
+  // revoke recorded video URL when it changes or on unmount to avoid leaks
+  useEffect(() => {
+    return () => {
+      if (recordedVideo) {
+        try {
+          URL.revokeObjectURL(recordedVideo);
+        } catch {}
+      }
+    };
+  }, [recordedVideo]);
+
+  /* ------------------------------------
      FILE UPLOAD / DRAG & DROP
   ------------------------------------ */
   const handleFile = (file: File) => {
@@ -157,7 +235,7 @@ export default function CreatePost() {
       content,
       type,
       image: image || null,
-      videoLink: videoLink || null,
+      videoLink: recordedVideo || videoLink || null,
       createdAt: new Date(),
     };
 
@@ -231,31 +309,57 @@ export default function CreatePost() {
                   muted
                 />
 
-                <button
-                  type="button"
-                  className="capture-btn"
-                  onClick={capturePhoto}
-                >
-                  Capture Photo
-                </button>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="capture-btn"
+                    onClick={capturePhoto}
+                  >
+                    Capture Photo
+                  </button>
 
-                <button
-                  type="button"
-                  className="stop-camera-btn"
-                  onClick={stopCamera}
-                >
-                  Close Camera
-                </button>
+                  {!recording && (
+                    <button
+                      type="button"
+                      className="camera-btn"
+                      onClick={startRecording}
+                    >
+                      Start Recording
+                    </button>
+                  )}
+
+                  {recording && (
+                    <button
+                      type="button"
+                      className="stop-camera-btn"
+                      onClick={stopRecording}
+                    >
+                      Stop Recording
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className="stop-camera-btn"
+                    onClick={stopCamera}
+                  >
+                    Close Camera
+                  </button>
+                </div>
               </div>
             )}
           </div>
 
-          {/* IMAGE PREVIEW */}
-          {image && (
+          {/* PREVIEW (image or recorded video) */}
+          {recordedVideo ? (
+            <div className="preview-box">
+              <video src={recordedVideo} controls className="video-preview" />
+            </div>
+          ) : image ? (
             <div className="preview-box">
               <img src={image} alt="Captured" className="preview-image" />
             </div>
-          )}
+          ) : null}
 
           {/* UPLOAD / DRAG & DROP (optional) */}
           <div className="form-group">
