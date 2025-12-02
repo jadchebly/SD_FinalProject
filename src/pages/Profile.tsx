@@ -81,8 +81,9 @@ export default function Profile() {
       const storedPosts = localStorage.getItem("posts");
       if (storedPosts) {
         try {
-          const allPosts = JSON.parse(storedPosts);
-          const filtered = allPosts.filter((post: Post) => post.user === user.username);
+          const allPosts = JSON.parse(storedPosts) as Post[];
+          const normalized = allPosts.map(p => ({ ...p, likers: p.likers ?? [] }));
+          const filtered = normalized.filter((post: Post) => post.user === user.username);
           setUserPosts(filtered);
         } catch (error) {
           console.error("Error parsing posts from localStorage:", error);
@@ -235,7 +236,7 @@ export default function Profile() {
                     <div className="profile-post-footer">
                       <div className="profile-post-likes">
                         <AiFillLike className="profile-like-icon" />
-                        <span>{post.likes || 0}</span>
+                        <span>{post.likers?.length ?? post.likes ?? 0}</span>
                       </div>
                       {post.comments && post.comments.length > 0 && (
                         <div className="profile-post-comments">
