@@ -4,16 +4,17 @@ import { IoHome } from "react-icons/io5";
 import { IoArrowBack } from "react-icons/io5";
 import { GiEgyptianProfile } from "react-icons/gi";
 import { useState, useEffect } from "react";
+import { useAuth } from "../../../contexts/AuthContext";
 import "./Navbar.css"; 
 
 export default function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const isCreatePost = location.pathname === "/create-post";
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
-    // Load search query from localStorage on mount
     const savedQuery = localStorage.getItem("searchQuery") || "";
     setSearchQuery(savedQuery);
   }, []);
@@ -21,9 +22,7 @@ export default function Navbar() {
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const query = e.target.value;
     setSearchQuery(query);
-    // Store in localStorage so Dashboard can access it
     localStorage.setItem("searchQuery", query);
-    // Trigger a custom event so Dashboard can react to search changes
     window.dispatchEvent(new Event("searchUpdate"));
   };
 
@@ -74,6 +73,9 @@ export default function Navbar() {
               <GiEgyptianProfile size={24} />
             </Link>
           </div>
+          {user && (
+            <span className="username-display">{user.username}</span>
+          )}
         </div>
       </div>
     </div>  

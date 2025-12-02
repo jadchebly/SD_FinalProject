@@ -1,52 +1,46 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import './style.css'
+import { AuthProvider } from './contexts/AuthContext'
+import ProtectedRoute from './components/ProtectedRoute'
 import Dashboard from './components/Dashboard/Dashboard'
-import CreatePost from "./pages/CreatePost";
-
-function SignIn() {
-  return (
-    <div>
-      <h1>Sign In</h1>
-      <p>This is the sign in page.</p>
-    </div>
-  )
-}
-
-function SignUp() {
-  return (
-    <div>
-      <h1>Sign Up</h1>
-      <p>This is the sign up page.</p>
-    </div>
-  )
-}
-
-function Profile() {
-  return (
-    <div>
-      <h1>Profile</h1>
-      <p>This is the profile page.</p>
-    </div>
-  )
-}
+import CreatePost from "./pages/CreatePost"
+import Login from './pages/Login'
+import SignUp from './pages/SignUp'
+import Profile from './pages/Profile'
 
 function App() {
   return (
-    <div>
+    <AuthProvider>
       <Routes>
-        {/*sign in/sign up page at start*/}
-        <Route path="/" element={<SignIn />} />
-        <Route path="/signin" element={<SignIn />} />
-        {/*dashboard page*/}
-        <Route path="/dashboard" element={<Dashboard />} />
-        {/*create post page*/}
-        <Route path="/create-post" element={<CreatePost />} />
-        {/*profile page*/}
-        <Route path="/profile" element={<Profile />} />
-        {/*sign up page*/}
+        <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route 
+          path="/dashboard" 
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/create-post" 
+          element={
+            <ProtectedRoute>
+              <CreatePost />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/profile" 
+          element={
+            <ProtectedRoute>
+              <Profile />
+            </ProtectedRoute>
+          } 
+        />
       </Routes>
-    </div>
+    </AuthProvider>
   )
 }
 
