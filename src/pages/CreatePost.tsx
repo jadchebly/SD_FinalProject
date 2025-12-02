@@ -1,12 +1,15 @@
 import Navbar from "../components/Dashboard/Navbar/Navbar";
 import "./CreatePost.css";
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import type { Post } from "../types/Post";
 
 export default function CreatePost() {
+  const navigate = useNavigate();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [type, setType] = useState("blurb");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const [image, setImage] = useState("");
   const [videoLink, setVideoLink] = useState("");
@@ -349,7 +352,15 @@ export default function CreatePost() {
     setRecordedVideo(null);
     setType("blurb");
 
-    alert("Post submitted successfully!");
+    // Show success modal
+    setShowSuccessModal(true);
+  };
+
+  const handleSuccessOk = () => {
+    setShowSuccessModal(false);
+    navigate("/dashboard");
+    // Scroll to top of page
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const removePreview = () => {
@@ -554,6 +565,23 @@ export default function CreatePost() {
       </div>
 
       <canvas ref={canvasRef} style={{ display: "none" }} />
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="success-modal-overlay" onClick={handleSuccessOk}>
+          <div className="success-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="success-modal-body">
+              <h2 className="success-modal-title">Post Successful</h2>
+              <p className="success-modal-message">Your post has been created successfully!</p>
+            </div>
+            <div className="success-modal-footer">
+              <button className="success-modal-btn" onClick={handleSuccessOk}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
