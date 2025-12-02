@@ -243,6 +243,21 @@ export default function CreatePost() {
     alert("Post submitted! (Check console)");
   };
 
+  const removePreview = () => {
+    // revoke object URL if recorded video
+    if (recordedVideo) {
+      try {
+        URL.revokeObjectURL(recordedVideo);
+      } catch {}
+      setRecordedVideo(null);
+    }
+
+    // clear image preview
+    setImage("");
+    // reset type to default
+    setType("blurb");
+  };
+
   return (
     <div>
       <Navbar />
@@ -353,10 +368,12 @@ export default function CreatePost() {
           {/* PREVIEW (image or recorded video) */}
           {recordedVideo ? (
             <div className="preview-box">
+              <button className="preview-close" onClick={removePreview} aria-label="Remove preview">×</button>
               <video src={recordedVideo} controls className="video-preview" />
             </div>
           ) : image ? (
             <div className="preview-box">
+              <button className="preview-close" onClick={removePreview} aria-label="Remove preview">×</button>
               <img src={image} alt="Captured" className="preview-image" />
             </div>
           ) : null}
