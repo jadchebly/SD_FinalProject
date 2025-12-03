@@ -230,6 +230,23 @@ class ApiService {
     return response.json();
   }
 
+  async getSuggestedUsers(): Promise<any> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const response = await fetch(`${API_URL}/api/users/suggested`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.id && { 'x-user-id': user.id }),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get suggested users');
+    }
+
+    return response.json();
+  }
+
   async followUser(userId: string): Promise<any> {
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     

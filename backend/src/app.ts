@@ -237,6 +237,50 @@ app.post('/api/login', async (req, res) => {
 });
 
 // Get user profile
+// Suggested users for a user (users the current user is not following)
+app.get('/api/users/suggested', async (req, res) => {
+  try {
+    const currentUserId = req.headers['x-user-id'] as string | undefined;
+
+    // Get list of users the current user is following (if logged in)
+    let followingIds: string[] = [];
+    if (currentUserId) {
+      const { data: follows } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', currentUserId);
+
+      followingIds = follows?.map(f => f.following_id) || [];
+    }
+
+    // Fetch candidate users (limit to 100 for efficiency) and filter in JS
+    const { data: usersRaw, error } = await supabaseAdmin
+      .from('users')
+      .select('id, username, avatar_url, email')
+      .limit(100);
+
+    if (error) throw error;
+
+    const excludeSet = new Set([currentUserId, ...(followingIds || [])]);
+    const candidates = (usersRaw || []).filter((u: any) => !excludeSet.has(u.id));
+
+    // Shuffle and pick up to 5 suggestions
+    const shuffled = candidates.sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, 5).map((u: any) => ({
+      id: u.id,
+      username: u.username,
+      avatar: u.avatar_url || null,
+      email: u.email || null,
+      isFollowing: false,
+    }));
+
+    res.json({ success: true, users: selected });
+  } catch (error: any) {
+    console.error('Get suggested users error:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Failed to get suggested users' });
+  }
+});
+
 app.get('/api/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -666,6 +710,50 @@ app.get('/api/users/search/:query', async (req, res) => {
       success: false,
       error: error?.message || 'Failed to search users',
     });
+  }
+});
+
+// Suggested users for a user (users the current user is not following)
+app.get('/api/users/suggested', async (req, res) => {
+  try {
+    const currentUserId = req.headers['x-user-id'] as string | undefined;
+
+    // Get list of users the current user is following (if logged in)
+    let followingIds: string[] = [];
+    if (currentUserId) {
+      const { data: follows } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', currentUserId);
+
+      followingIds = follows?.map(f => f.following_id) || [];
+    }
+
+    // Fetch candidate users (limit to 100 for efficiency) and filter in JS
+    const { data: usersRaw, error } = await supabaseAdmin
+      .from('users')
+      .select('id, username, avatar_url, email')
+      .limit(100);
+
+    if (error) throw error;
+
+    const excludeSet = new Set([currentUserId, ...(followingIds || [])]);
+    const candidates = (usersRaw || []).filter((u: any) => !excludeSet.has(u.id));
+
+    // Shuffle and pick up to 5 suggestions
+    const shuffled = candidates.sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, 5).map((u: any) => ({
+      id: u.id,
+      username: u.username,
+      avatar: u.avatar_url || null,
+      email: u.email || null,
+      isFollowing: false,
+    }));
+
+    res.json({ success: true, users: selected });
+  } catch (error: any) {
+    console.error('Get suggested users error:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Failed to get suggested users' });
   }
 });
 

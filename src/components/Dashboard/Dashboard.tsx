@@ -71,6 +71,12 @@ export default function Dashboard() {
     return () => window.removeEventListener('followingChanged', handler as EventListener);
   }, [user]);
 
+  // Open suggested users modal when Navbar requests it
+  // Suggested users modal is opened automatically when the dashboard loads
+  // (see effect below that shows modal if the user follows 0 users). We
+  // previously supported opening it via a custom event; that behavior has
+  // been removed to avoid manual triggering.
+
   // Filter posts based on search query
   useEffect(() => {
     if (!user) {
