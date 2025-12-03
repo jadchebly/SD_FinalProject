@@ -32,22 +32,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [followingList, setFollowingList] = useState<string[]>([]);
   const [seenSuggested, setSeenSuggested] = useState<Set<string>>(new Set());
 
-  // Rehydrate user from backend on mount (DB-backed session)
+  // Rehydrate user from localStorage first, then verify with backend
   useEffect(() => {
     let mounted = true;
     const init = async () => {
+      // First, try to load from localStorage for immediate UI
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          setUser(parsedUser);
+          // Set auth provider immediately so getMe can use it
+          api.setAuthHeaderProvider(() => {
+            return { ...(parsedUser && parsedUser.id ? { 'x-user-id': parsedUser.id } : {}) };
+          });
+        } catch (error) {
+          console.error('Error parsing stored user:', error);
+          localStorage.removeItem('user');
+        }
+      }
+
+      // Then verify with backend
       try {
         const res = await api.getMe();
         if (!mounted) return;
         if (res && res.success && res.user) {
+          // Update with fresh data from backend
           setUser(res.user);
+          localStorage.setItem('user', JSON.stringify(res.user));
         } else {
+          // Backend says not authenticated, clear localStorage
           setUser(null);
+          localStorage.removeItem('user');
         }
 
         if (res && res.success && res.user) {
           try {
-            const f = await api.getFollowing();
+            const f = await api.getFollowing(res.user.id);
             if (f && f.success) setFollowingList(f.following || []);
           } catch (e) {
             console.warn('Failed to load following list', e);
@@ -55,8 +76,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
       } catch (e) {
-        console.error('Failed to rehydrate user:', e);
-        setUser(null);
+        console.error('Failed to rehydrate user from backend:', e);
+        // If backend call fails but we have localStorage user, keep it
+        // Otherwise clear everything
+        if (!storedUser) {
+          setUser(null);
+          localStorage.removeItem('user');
+        }
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -96,10 +122,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           avatar: response.user.avatar || null,
         };
         setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
 
         // Refresh following list for the authenticated user
         try {
-          const f = await api.getFollowing();
+          const f = await api.getFollowing(userData.id);
           if (f && f.success) setFollowingList(f.following || []);
         } catch (e) {
           console.warn('Failed to load following after login', e);
@@ -125,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           avatar: response.user.avatar || null,
         };
         setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
 
         // new users start with empty following
         setFollowingList([]);
@@ -153,6 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setUser(null);
     setFollowingList([]);
+    localStorage.removeItem('user');
   };
 
   const updateAvatar = async (avatar: string) => {
