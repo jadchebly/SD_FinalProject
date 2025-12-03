@@ -902,7 +902,14 @@ app.put('/api/posts/:id', async (req, res) => {
     const { title, content } = req.body;
     const user_id = req.headers['x-user-id'] as string;
 
+    console.log('✏️ PUT /api/posts/:id called');
+    console.log('✏️ Post ID:', id);
+    console.log('✏️ User ID from header:', user_id);
+    console.log('✏️ Title:', title);
+    console.log('✏️ Content:', content);
+
     if (!user_id) {
+      console.error('❌ No user ID provided');
       return res.status(400).json({ error: 'User ID is required' });
     }
 
@@ -922,14 +929,19 @@ app.put('/api/posts/:id', async (req, res) => {
       return res.status(400).json({ error: 'Content cannot be empty' });
     }
 
-    // First, check if post exists and user owns it
-    const { data: post, error: fetchError } = await supabase
+    const { data: post, error: fetchError } = await supabaseAdmin
       .from('posts')
       .select('id, user_id')
       .eq('id', id)
       .single();
 
-    if (fetchError || !post) {
+    if (fetchError) {
+      console.error('Error fetching post:', fetchError);
+      return res.status(404).json({ error: 'Post not found', details: fetchError.message });
+    }
+
+    if (!post) {
+      console.error('Post not found in database');
       return res.status(404).json({ error: 'Post not found' });
     }
 
@@ -938,8 +950,8 @@ app.put('/api/posts/:id', async (req, res) => {
       return res.status(403).json({ error: 'You can only edit your own posts' });
     }
 
-    // Update the post
-    const { data: updatedPosts, error: updateError } = await supabase
+    // Update the post (using admin client to bypass RLS)
+    const { data: updatedPosts, error: updateError } = await supabaseAdmin
       .from('posts')
       .update({
         title: trimmedTitle,
@@ -950,8 +962,7 @@ app.put('/api/posts/:id', async (req, res) => {
       .select();
 
     if (updateError) {
-      console.error('Update post error:', updateError);
-      throw updateError;
+     throw updateError;
     }
 
     if (!updatedPosts || updatedPosts.length === 0) {
@@ -959,6 +970,7 @@ app.put('/api/posts/:id', async (req, res) => {
     }
 
     const updatedPost = updatedPosts[0];
+    console.log('✅ Post updated successfully:', { id: updatedPost.id, title: updatedPost.title });
 
     res.json({
       success: true,
@@ -966,6 +978,12 @@ app.put('/api/posts/:id', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Update post error:', error);
+    console.error('Error details:', {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+    });
     res.status(500).json({
       success: false,
       error: error?.message || 'Failed to update post',
