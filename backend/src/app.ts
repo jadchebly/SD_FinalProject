@@ -675,7 +675,7 @@ app.get('/api/posts', async (req, res) => {
     const userId = req.query.user_id as string;
     const currentUserId = req.headers['x-user-id'] as string;
 
-    let query = supabase
+    let query = supabaseAdmin
       .from('posts')
       .select(`
         *,
@@ -705,15 +705,15 @@ app.get('/api/posts', async (req, res) => {
       });
     }
 
-    // Get likes for each post
+    // Get likes for each post (using admin client to bypass RLS)
     const postIds = posts.map(p => p.id);
-    const { data: likes } = await supabase
+    const { data: likes } = await supabaseAdmin
       .from('likes')
       .select('user_id, post_id')
       .in('post_id', postIds);
 
-    // Get comments count for each post
-    const { data: comments } = await supabase
+    // Get comments count for each post (using admin client to bypass RLS)
+    const { data: comments } = await supabaseAdmin
       .from('comments')
       .select('post_id')
       .in('post_id', postIds);
