@@ -20,6 +20,7 @@ export default function Dashboard() {
   const [showDeletePostConfirm, setShowDeletePostConfirm] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editFormData, setEditFormData] = useState({ title: "", content: "" });
+  const [showDeleteFromEditConfirm, setShowDeleteFromEditConfirm] = useState(false);
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
   const [showSuggestedUsers, setShowSuggestedUsers] = useState(false);
   const [shouldFocusComment, setShouldFocusComment] = useState(false);
@@ -395,6 +396,36 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteFromEdit = async () => {
+    if (!editingPost) return;
+
+    try {
+      await api.deletePost(editingPost.id);
+      
+      // Remove from local state
+      setPosts((prevPosts) => {
+        const updated = prevPosts.filter((post) => post.id !== editingPost.id);
+        return updated;
+      });
+
+      // Close modals
+      setShowDeleteFromEditConfirm(false);
+      handleEditCancel();
+      
+      // If the deleted post was selected, close the detail view
+      if (selectedPost && selectedPost.id === editingPost.id) {
+        setSelectedPost(null);
+      }
+
+      // Show success message
+      setShowDeleteSuccess(true);
+    } catch (error: any) {
+      console.error("Error deleting post:", error);
+      alert(`Failed to delete post: ${error?.message || "Unknown error"}`);
+      // Don't close modals on error - let user try again or cancel
+    }
+  };
+
   const getMediaElement = (post: Post, isModal: boolean = false) => {
     // Priority: photo capture > video capture > uploaded file > YouTube link
     if (post.image && post.type === "photo") {
@@ -741,7 +772,7 @@ export default function Dashboard() {
         )}
 
         {/* Edit Post Modal */}
-        {editingPost && (
+        {editingPost && !showDeleteFromEditConfirm && (
           <div 
             className="post-modal-overlay"
             onClick={handleEditCancel}
@@ -785,10 +816,49 @@ export default function Dashboard() {
                 </button>
                 <button 
                   type="button" 
+                  className="edit-delete-btn" 
+                  onClick={() => setShowDeleteFromEditConfirm(true)}
+                >
+                  Delete
+                </button>
+                <button 
+                  type="button" 
                   className="edit-save-btn" 
                   onClick={handleSaveChanges}
                 >
                   Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal from Edit */}
+        {showDeleteFromEditConfirm && editingPost && (
+          <div 
+            className="post-modal-overlay"
+            onClick={() => setShowDeleteFromEditConfirm(false)}
+          >
+            <div 
+              className="delete-confirm-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="delete-confirm-title">Are you sure?</h3>
+              <p className="delete-confirm-message">This action cannot be undone.</p>
+              <div className="delete-confirm-actions">
+                <button 
+                  type="button" 
+                  className="delete-confirm-no-btn" 
+                  onClick={() => setShowDeleteFromEditConfirm(false)}
+                >
+                  No
+                </button>
+                <button 
+                  type="button" 
+                  className="delete-confirm-yes-btn" 
+                  onClick={handleDeleteFromEdit}
+                >
+                  Yes
                 </button>
               </div>
             </div>

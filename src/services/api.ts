@@ -367,6 +367,24 @@ class ApiService {
 
     return response.json();
   }
+
+  async getUserPosts(userId: string): Promise<any> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    
+    const response = await fetch(`${API_URL}/api/posts?user_id=${userId}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.id && { 'x-user-id': user.id }),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get user posts');
+    }
+
+    return response.json();
+  }
 }
 
 export default new ApiService();
