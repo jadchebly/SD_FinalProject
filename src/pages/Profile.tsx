@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useParams } from 'react-router-dom';
 import Navbar from '../components/Dashboard/Navbar/Navbar';
 import { GiEgyptianProfile } from 'react-icons/gi';
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
 import type { Post } from '../types/Post';
 import { AiFillLike } from 'react-icons/ai';
 import api from '../services/api';
@@ -89,14 +89,28 @@ export default function Profile() {
     fileInputRef.current?.click();
   };
 
+  // Memoize profileId to ensure it's stable and always uses paramId when available
+  const profileId = useMemo(() => {
+    return paramId !== undefined ? paramId : (user?.id || '');
+  }, [paramId, user?.id]);
+
+  // Use ref to store current profileId for interval callback
+  const profileIdRef = useRef<string>('');
+  
   // Load user's posts from backend
   useEffect(() => {
+    if (!profileId) return;
+    
+    // Update ref whenever profileId changes
+    profileIdRef.current = profileId;
+
     const loadUserPosts = async () => {
-      const profileId = paramId || user?.id;
-      if (!profileId) return;
-      
+      // Always use the latest profileId from ref
+      const currentProfileId = profileIdRef.current;
+      if (!currentProfileId) return;
+
       try {
-        const response = await api.getUserPosts(profileId);
+        const response = await api.getUserPosts(currentProfileId);
         if (response.success && response.posts) {
           // Transform API posts to match Post type
           const transformedPosts: Post[] = response.posts.map((p: any) => ({
@@ -148,18 +162,19 @@ export default function Profile() {
 
     loadUserPosts();
     
-    // Refresh posts every 30 seconds
-    const interval = setInterval(loadUserPosts, 30000);
+    // Refresh posts every 30 seconds - uses ref to get latest profileId
+    const interval = setInterval(() => {
+      loadUserPosts();
+    }, 30000);
     
     return () => clearInterval(interval);
-  }, [user, paramId]);
+  }, [profileId]);
 
   // Load profile metadata (followers/following/isFollowing) when viewing someone else's profile
   useEffect(() => {
-    const loadProfile = async () => {
-      const profileId = paramId || user?.id;
-      if (!profileId) return;
+    if (!profileId) return;
 
+    const loadProfile = async () => {
       try {
         const res = await api.getUserProfile(profileId);
         if (res && res.success) {
@@ -174,7 +189,7 @@ export default function Profile() {
     };
 
     loadProfile();
-  }, [paramId, user]);
+  }, [profileId]);
 
   const getTimeAgo = (createdAt: string): string => {
     const now = new Date();
@@ -411,8 +426,10 @@ export default function Profile() {
     if (!user || !profileInfo) return;
     try {
       const res = await api.getFollowers(user.id);
+      console.log('Followers modal response:', res);
       if (res && res.success) {
         const users = res.users || [];
+        console.log('Followers users:', users);
         setFollowersList(users);
         const statusMap: Record<string, boolean> = {};
         users.forEach((u: any) => {
@@ -420,18 +437,26 @@ export default function Profile() {
         });
         setModalFollowStatus(statusMap);
         setShowFollowersModal(true);
+      } else {
+        console.warn('Followers modal response missing success or users:', res);
+        setFollowersList([]);
+        setShowFollowersModal(true);
       }
     } catch (err) {
       console.error('Failed to load followers:', err);
+      setFollowersList([]);
+      setShowFollowersModal(true);
     }
   };
 
   const handleOpenFollowingModal = async () => {
     if (!user || !profileInfo) return;
     try {
-      const res = await api.getFollowing(user.id);
+      const res = await api.getUserFollowing(user.id);
+      console.log('Following modal response:', res);
       if (res && res.success) {
         const users = res.users || [];
+        console.log('Following users:', users);
         setFollowingList(users);
         const statusMap: Record<string, boolean> = {};
         users.forEach((u: any) => {
@@ -439,9 +464,15 @@ export default function Profile() {
         });
         setModalFollowStatus(statusMap);
         setShowFollowingModal(true);
+      } else {
+        console.warn('Following modal response missing success or users:', res);
+        setFollowingList([]);
+        setShowFollowingModal(true);
       }
     } catch (err) {
       console.error('Failed to load following:', err);
+      setFollowingList([]);
+      setShowFollowingModal(true);
     }
   };
 
@@ -500,7 +531,7 @@ export default function Profile() {
     return <div>Please log in</div>;
   }
 
-  const profileId = paramId || user.id;
+  // Use the memoized profileId (defined above)
   const isOwnProfile = !paramId || paramId === user.id;
   const displayUser = isOwnProfile ? user : (profileInfo ? {
     id: profileInfo.id,
@@ -557,7 +588,7 @@ export default function Profile() {
                       {profileInfo.isFollowing ? 'Following' : 'Follow'}
                     </button>
                   )}
-                  <div className="follow-counts">
+                  <div className={`follow-counts ${isOwnProfile ? 'own-profile' : ''}`}>
                     <span 
                       onClick={() => {
                         if (isOwnProfile && (profileInfo.followerCount || 0) > 0) {
@@ -829,8 +860,7 @@ export default function Profile() {
       {showFollowersModal && (
         <div className="post-modal-overlay" onClick={handleCloseFollowersModal}>
           <div className="post-modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={handleCloseFollowersModal}>×</button>
-            <h2 className="modal-title" style={{ marginBottom: '20px' }}>Followers</h2>
+            <h2 className="modal-title" style={{ marginBottom: '20px', marginTop: '20px' }}>Followers</h2>
             <div className="modal-comments-section" style={{ maxHeight: '500px', overflowY: 'auto' }}>
               {followersList.length === 0 ? (
                 <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(0,0,0,0.6)' }}>
@@ -842,7 +872,10 @@ export default function Profile() {
                   const isFollowing = modalFollowStatus[follower.id] || false;
                   return (
                     <div key={follower.id} className="people-search-row" style={{ marginBottom: '12px' }}>
-                      <div className="people-search-left" onClick={() => navigate(`/profile/${follower.id}`)}>
+                      <div className="people-search-left" onClick={() => {
+                        handleCloseFollowersModal();
+                        navigate(`/profile/${follower.id}`);
+                      }}>
                         {hasCustomAvatar ? (
                           <img src={follower.avatar_url} alt={follower.username} className="people-search-avatar" />
                         ) : (
@@ -889,7 +922,10 @@ export default function Profile() {
                   const isFollowing = modalFollowStatus[followingUser.id] || false;
                   return (
                     <div key={followingUser.id} className="people-search-row" style={{ marginBottom: '12px' }}>
-                      <div className="people-search-left" onClick={() => navigate(`/profile/${followingUser.id}`)}>
+                      <div className="people-search-left" onClick={() => {
+                        handleCloseFollowingModal();
+                        navigate(`/profile/${followingUser.id}`);
+                      }}>
                         {hasCustomAvatar ? (
                           <img src={followingUser.avatar_url} alt={followingUser.username} className="people-search-avatar" />
                         ) : (

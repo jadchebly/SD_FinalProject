@@ -99,7 +99,7 @@ export default function Navbar() {
             <IoArrowBack size={24} />
           </button>
         ) : (
-          <div className="top-navbar-logo">REDDIET</div>
+          <div className="top-navbar-logo">IEstagram</div>
         )}
         
         {!isCreatePost && (

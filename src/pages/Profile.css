@@ -116,7 +116,7 @@
   transition: color 0.2s ease-in-out;
 }
 
-.follow-counts span:hover {
+.follow-counts.own-profile span:hover {
   color: #0066ff;
 }
 
