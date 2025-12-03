@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../services/api';
 import { GiEgyptianProfile } from 'react-icons/gi';
 import './SuggestedUsersModal.css';
 
@@ -21,7 +22,9 @@ export default function SuggestedUsersModal({ isOpen, onClose }: SuggestedUsersM
   const [following, setFollowing] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (isOpen && user) {
+    if (isOpen) {
+      // Always attempt to load suggestions from backend when modal opens.
+      // If user is logged out, backend will still return a random set.
       loadSuggestedUsers();
       loadFollowingList();
     }
@@ -33,37 +36,46 @@ export default function SuggestedUsersModal({ isOpen, onClose }: SuggestedUsersM
     setFollowing(new Set(followingList));
   };
 
-  const loadSuggestedUsers = () => {
+  const loadSuggestedUsers = async () => {
     if (!user) return;
 
-    // Get all users from localStorage
-    const allUsers = JSON.parse(localStorage.getItem('users') || '[]');
-    
-    // Filter out current user and already followed users
-    const followingList = getFollowingList();
-    const availableUsers = allUsers.filter(
-      (u: any) => u.id !== user.id && !followingList.includes(u.id)
-    );
+    try {
+      const res = await api.getSuggestedUsers();
+      console.debug('SuggestedUsersModal: API response', res);
+      if (res && res.success && Array.isArray(res.users) && res.users.length > 0) {
+        setSuggestedUsers(res.users.map((u: any) => ({
+          id: u.id,
+          username: u.username,
+          email: u.email || '',
+          avatar: u.avatar || undefined,
+        })));
+        return;
+      }
+    } catch (e) {
+      console.warn('Failed to load suggested users from API, falling back to localStorage', e);
+    }
 
-    // Randomly select up to 5 users
-    const shuffled = [...availableUsers].sort(() => 0.5 - Math.random());
-    const selected = shuffled.slice(0, 5);
-
-    setSuggestedUsers(selected.map((u: any) => ({
-      id: u.id,
-      username: u.username,
-      email: u.email,
-      avatar: u.avatar
-    })));
+    // Fallback: use localStorage (existing behavior)
+    try {
+      const allUsers = JSON.parse(localStorage.getItem('users') || '[]');
+      const followingList = getFollowingList();
+      const availableUsers = allUsers.filter((u: any) => u.id !== user.id && !followingList.includes(u.id));
+      const shuffled = [...availableUsers].sort(() => 0.5 - Math.random());
+      const selected = shuffled.slice(0, 5);
+      setSuggestedUsers(selected.map((u: any) => ({ id: u.id, username: u.username, email: u.email, avatar: u.avatar })));
+    } catch (e) {
+      console.error('Failed to load fallback suggested users', e);
+      setSuggestedUsers([]);
+    }
   };
 
-  const handleFollow = (userId: string) => {
-    followUser(userId);
+  const handleFollow = async (userId: string) => {
+    await followUser(userId);
     setFollowing(prev => new Set([...prev, userId]));
   };
 
-  const handleUnfollow = (userId: string) => {
-    unfollowUser(userId);
+  const handleUnfollow = async (userId: string) => {
+    await unfollowUser(userId);
     setFollowing(prev => {
       const newSet = new Set(prev);
       newSet.delete(userId);

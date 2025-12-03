@@ -15,8 +15,8 @@ interface AuthContextType {
   signup: (username: string, email: string, password: string) => Promise<boolean>;
   logout: () => void;
   updateAvatar: (avatar: string) => void;
-  followUser: (userId: string) => void;
-  unfollowUser: (userId: string) => void;
+  followUser: (userId: string) => Promise<void>;
+  unfollowUser: (userId: string) => Promise<void>;
   getFollowingList: () => string[];
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -113,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('users', JSON.stringify(updatedUsers));
   };
 
-  const followUser = (userId: string) => {
+  const followUser = async (userId: string) => {
     if (!user) return;
     
     const following = JSON.parse(localStorage.getItem('following') || '{}');
@@ -125,15 +125,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       following[user.id].push(userId);
       localStorage.setItem('following', JSON.stringify(following));
     }
-    // Also notify backend (fire-and-forget). Backend will persist follow relationship.
-    (async () => {
-      try {
-        await api.followUser(userId);
-      } catch (err) {
-        console.warn('Failed to notify backend of follow:', err);
-      }
-    })();
+    
+    // Update backend first, then notify app that following list changed
+    try {
+      await api.followUser(userId);
+      console.log('Follow relationship saved to backend');
+    } catch (err) {
+      console.warn('Failed to notify backend of follow:', err);
+      // Still dispatch event even if backend call fails, so UI updates
+    }
+    
     // Notify app that following list changed so components (feed) can refresh
+    // Dispatch after backend call completes so feed refresh gets updated data
     try {
       window.dispatchEvent(new CustomEvent('followingChanged', { detail: { userId, action: 'follow' } }));
     } catch (e) {
@@ -141,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const unfollowUser = (userId: string) => {
+  const unfollowUser = async (userId: string) => {
     if (!user) return;
     
     const following = JSON.parse(localStorage.getItem('following') || '{}');
@@ -150,15 +153,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('following', JSON.stringify(following));
     }
 
-    // Also notify backend (fire-and-forget)
-    (async () => {
-      try {
-        await api.unfollowUser(userId);
-      } catch (err) {
-        console.warn('Failed to notify backend of unfollow:', err);
-      }
-    })();
+    // Update backend first, then notify app that following list changed
+    try {
+      await api.unfollowUser(userId);
+      console.log('Unfollow relationship saved to backend');
+    } catch (err) {
+      console.warn('Failed to notify backend of unfollow:', err);
+      // Still dispatch event even if backend call fails, so UI updates
+    }
+    
     // Notify app that following list changed so components (feed) can refresh
+    // Dispatch after backend call completes so feed refresh gets updated data
     try {
       window.dispatchEvent(new CustomEvent('followingChanged', { detail: { userId, action: 'unfollow' } }));
     } catch (e) {

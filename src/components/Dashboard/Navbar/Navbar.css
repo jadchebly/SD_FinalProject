@@ -269,6 +269,7 @@
   .people-search-button:hover {
     background-color: rgba(0,0,0,0.04);
   }
+  /* removed discover-people-button (was used to open modal manually) */
   .people-search-panel {
     position: absolute;
     right: 0;
