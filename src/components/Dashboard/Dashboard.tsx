@@ -7,9 +7,11 @@ import { GiEgyptianProfile } from "react-icons/gi";
 import { useAuth } from "../../contexts/AuthContext";
 import { FaTrash, FaComment } from "react-icons/fa";
 import api from "../../services/api";
+import { FiEdit2 } from "react-icons/fi";
+import SuggestedUsersModal from "../SuggestedUsersModal";
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, getFollowingList } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
   const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
@@ -17,6 +19,11 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [postToDelete, setPostToDelete] = useState<Post | null>(null);
   const [showDeletePostConfirm, setShowDeletePostConfirm] = useState(false);
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [editFormData, setEditFormData] = useState({ title: "", content: "", videoLink: "" });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
+  const [showSuggestedUsers, setShowSuggestedUsers] = useState(false);
 
   // Load posts from API feed
   useEffect(() => {
@@ -87,6 +94,28 @@ export default function Dashboard() {
   }, []);
 
   // Scroll to top when component mounts
+  // Show suggested users modal once when dashboard loads if user follows 0 users
+  useEffect(() => {
+    if (user) {
+      // Check if we've already shown the modal in this session
+      const hasShownModal = sessionStorage.getItem(`suggestedUsersShown_${user.id}`);
+      
+      if (!hasShownModal) {
+        const followingList = getFollowingList();
+        // Show modal if user follows 0 users
+        if (followingList.length === 0) {
+          // Small delay to ensure dashboard is rendered
+          setTimeout(() => {
+            setShowSuggestedUsers(true);
+            // Mark that we've shown the modal for this user in this session
+            sessionStorage.setItem(`suggestedUsersShown_${user.id}`, 'true');
+          }, 500);
+        }
+      }
+    }
+  }, [user, getFollowingList]);
+
+  // for now, use local storage until we have a backend
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
@@ -615,6 +644,36 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* Delete Success Modal */}
+        {showDeleteSuccess && (
+          <div 
+            className="post-modal-overlay"
+            onClick={handleDeleteSuccessOk}
+          >
+            <div 
+              className="delete-success-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="delete-success-title">Post deleted</h3>
+              <div className="delete-success-actions">
+                <button 
+                  type="button" 
+                  className="delete-success-ok-btn" 
+                  onClick={handleDeleteSuccessOk}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Suggested Users Modal */}
+        <SuggestedUsersModal 
+          isOpen={showSuggestedUsers} 
+          onClose={() => setShowSuggestedUsers(false)}
+        />
       </div>
     </div>
   );
