@@ -3,7 +3,7 @@ import { AiFillPlusCircle } from "react-icons/ai";
 import { IoHome } from "react-icons/io5";
 import { IoArrowBack } from "react-icons/io5";
 import { GiEgyptianProfile } from "react-icons/gi";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAuth } from "../../../contexts/AuthContext";
 import "./Navbar.css"; 
 
