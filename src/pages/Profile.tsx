@@ -5,7 +5,6 @@ import { GiEgyptianProfile } from 'react-icons/gi';
 import { useRef, useState, useEffect } from 'react';
 import type { Post } from '../types/Post';
 import { AiFillLike } from 'react-icons/ai';
-import api from '../services/api';
 import './Profile.css';
 
 export default function Profile() {
@@ -74,41 +73,28 @@ export default function Profile() {
     fileInputRef.current?.click();
   };
 
-  // Load user's posts from backend
+  // Load user's posts
   useEffect(() => {
-    const loadUserPosts = async () => {
-      if (!user || !user.id) return;
+    const loadUserPosts = () => {
+      if (!user) return;
       
-      try {
-        const response = await api.getUserPosts(user.id);
-        if (response.success && response.posts) {
-          // Transform API posts to match Post type
-          const transformedPosts: Post[] = response.posts.map((p: any) => ({
-            id: p.id,
-            title: p.title,
-            content: p.content,
-            type: p.type,
-            image: p.image_url || undefined,
-            videoLink: p.video_url || undefined,
-            createdAt: p.created_at,
-            user: p.user || p.users?.username || 'Unknown',
-            likes: p.likes || 0,
-            likers: p.likers || [],
-            comments: [], // Comments can be loaded separately if needed
-          }));
-          
-          setUserPosts(transformedPosts);
+      const storedPosts = localStorage.getItem("posts");
+      if (storedPosts) {
+        try {
+          const allPosts = JSON.parse(storedPosts) as Post[];
+          const normalized = allPosts.map(p => ({ ...p, likers: p.likers ?? [] }));
+          const filtered = normalized.filter((post: Post) => post.user === user.username);
+          setUserPosts(filtered);
+        } catch (error) {
+          console.error("Error parsing posts from localStorage:", error);
         }
-      } catch (error) {
-        console.error("Error loading user posts:", error);
-        setUserPosts([]);
       }
     };
 
     loadUserPosts();
     
-    // Update posts every 30 seconds to refresh data (less frequent than localStorage)
-    const interval = setInterval(loadUserPosts, 30000);
+    // Update posts every second to refresh time ago
+    const interval = setInterval(loadUserPosts, 1000);
     
     return () => clearInterval(interval);
   }, [user]);
