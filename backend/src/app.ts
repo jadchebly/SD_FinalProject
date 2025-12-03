@@ -627,7 +627,7 @@ app.get('/api/users/search/:query', async (req, res) => {
     const { query } = req.params;
     const currentUserId = req.headers['x-user-id'] as string;
 
-    if (!query || query.trim().length < 2) {
+    if (!query || query.trim().length < 1) {
       return res.json({ success: true, users: [] });
     }
 
