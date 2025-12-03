@@ -92,6 +92,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    // Clear session storage flags for suggested users modal
+    // This ensures the modal will show again on next sign in
+    if (user) {
+      sessionStorage.removeItem(`suggestedUsersShown_${user.id}`);
+    }
     setUser(null);
     localStorage.removeItem('user');
   };

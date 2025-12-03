@@ -77,26 +77,24 @@ export default function Dashboard() {
     return () => window.removeEventListener("searchUpdate", handleSearchUpdate);
   }, [posts, user]);
 
-  // Show suggested users modal when dashboard loads if user follows 0 users
+  // Show suggested users modal once when dashboard loads if user follows 0 users
   useEffect(() => {
     if (user) {
-      const checkFollowingCount = () => {
+      // Check if we've already shown the modal in this session
+      const hasShownModal = sessionStorage.getItem(`suggestedUsersShown_${user.id}`);
+      
+      if (!hasShownModal) {
         const followingList = getFollowingList();
         // Show modal if user follows 0 users
         if (followingList.length === 0) {
-          setShowSuggestedUsers(true);
-        } else {
-          setShowSuggestedUsers(false);
+          // Small delay to ensure dashboard is rendered
+          setTimeout(() => {
+            setShowSuggestedUsers(true);
+            // Mark that we've shown the modal for this user in this session
+            sessionStorage.setItem(`suggestedUsersShown_${user.id}`, 'true');
+          }, 500);
         }
-      };
-      
-      // Check immediately
-      checkFollowingCount();
-      
-      // Also check periodically to catch changes from other tabs/components
-      const interval = setInterval(checkFollowingCount, 1000);
-      
-      return () => clearInterval(interval);
+      }
     }
   }, [user, getFollowingList]);
 
