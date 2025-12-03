@@ -1,1 +1,3 @@
-To start, run `npm run dev`
+To start frontend, run `npm run dev`
+
+To start backend, run `cd backend && npm run dev`
