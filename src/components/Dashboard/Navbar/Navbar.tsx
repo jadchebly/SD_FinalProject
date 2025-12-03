@@ -14,16 +14,11 @@ export default function Navbar() {
   const isCreatePost = location.pathname === "/create-post";
   const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    const savedQuery = localStorage.getItem("searchQuery") || "";
-    setSearchQuery(savedQuery);
-  }, []);
-
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const query = e.target.value;
     setSearchQuery(query);
-    localStorage.setItem("searchQuery", query);
-    window.dispatchEvent(new Event("searchUpdate"));
+    // Dispatch custom event with query data
+    window.dispatchEvent(new CustomEvent("searchUpdate", { detail: { query } }));
   };
 
   const handleBack = () => {

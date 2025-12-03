@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
+import api from '../services/api';
 
 interface User {
   id: string;
@@ -39,53 +40,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
-    // In a real app, this would call your backend API
-    // For now, we'll simulate with localStorage
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const foundUser = users.find((u: any) => u.email === email && u.password === password);
-    
-    if (foundUser) {
-      const userData = { 
-        id: foundUser.id, 
-        username: foundUser.username, 
-        email: foundUser.email,
-        avatar: foundUser.avatar
-      };
-      setUser(userData);
-      localStorage.setItem('user', JSON.stringify(userData));
-      return true;
+    try {
+      const response = await api.login(email, password);
+      if (response.success && response.user) {
+        const userData = {
+          id: response.user.id,
+          username: response.user.username,
+          email: response.user.email,
+          avatar: response.user.avatar || null,
+        };
+        setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Login error:', error);
+      return false;
     }
-    return false;
   };
 
   const signup = async (username: string, email: string, password: string): Promise<boolean> => {
-    // In a real app, this would call your backend API
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    
-    // Check if email already exists
-    if (users.some((u: any) => u.email === email)) {
+    try {
+      const response = await api.signup(username, email, password);
+      if (response.success && response.user) {
+        const userData = {
+          id: response.user.id,
+          username: response.user.username,
+          email: response.user.email,
+          avatar: response.user.avatar || null,
+        };
+        setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
+        return true;
+      }
       return false;
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      // Check if it's an email/username already exists error
+      if (error.message?.includes('already')) {
+        return false;
+      }
+      throw error; // Re-throw other errors
     }
-
-    // Create a default avatar (using a simple data URL for a default profile icon)
-    // In a real app, you might use a default image URL
-    const defaultAvatar = 'default'; // We'll use 'default' as a flag to show the icon
-
-    const newUser = {
-      id: crypto.randomUUID(),
-      username,
-      email,
-      password, // In production, this should be hashed!
-      avatar: defaultAvatar,
-    };
-
-    users.push(newUser);
-    localStorage.setItem('users', JSON.stringify(users));
-
-    const userData = { id: newUser.id, username, email, avatar: defaultAvatar };
-    setUser(userData);
-    localStorage.setItem('user', JSON.stringify(userData));
-    return true;
   };
 
   const logout = () => {

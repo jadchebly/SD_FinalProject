@@ -111,7 +111,20 @@
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
+}
+
+.post-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.post-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .like-button {
@@ -178,6 +191,58 @@
 }
 
 .edit-icon {
+  font-size: 16px;
+}
+
+.comment-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: all 0.2s ease-in-out;
+  font-size: 15px;
+  color: #1a1a1a;
+}
+
+.comment-button:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.comment-icon {
+  font-size: 20px;
+  color: #666;
+  transition: transform 0.2s ease-in-out;
+}
+
+.comment-button:hover .comment-icon {
+  transform: scale(1.1);
+  color: #333;
+}
+
+.delete-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid rgba(255, 68, 68, 0.2);
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: all 0.2s ease-in-out;
+  font-size: 14px;
+  color: #ff4444;
+}
+
+.delete-button:hover {
+  background-color: rgba(255, 68, 68, 0.08);
+  border-color: rgba(255, 68, 68, 0.4);
+}
+
+.delete-icon {
   font-size: 16px;
 }
 
