@@ -69,13 +69,13 @@ export default function SuggestedUsersModal({ isOpen, onClose }: SuggestedUsersM
     }
   };
 
-  const handleFollow = (userId: string) => {
-    followUser(userId);
+  const handleFollow = async (userId: string) => {
+    await followUser(userId);
     setFollowing(prev => new Set([...prev, userId]));
   };
 
-  const handleUnfollow = (userId: string) => {
-    unfollowUser(userId);
+  const handleUnfollow = async (userId: string) => {
+    await unfollowUser(userId);
     setFollowing(prev => {
       const newSet = new Set(prev);
       newSet.delete(userId);

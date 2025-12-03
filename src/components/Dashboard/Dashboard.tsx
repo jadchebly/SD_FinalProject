@@ -66,7 +66,13 @@ export default function Dashboard() {
 
   // Refresh feed when following list changes
   useEffect(() => {
-    const handler = () => fetchFeed();
+    if (!user) return;
+    
+    const handler = () => {
+      console.log('Following changed event received, refreshing feed...');
+      fetchFeed();
+    };
+    
     window.addEventListener('followingChanged', handler as EventListener);
     return () => window.removeEventListener('followingChanged', handler as EventListener);
   }, [user]);
