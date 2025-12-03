@@ -327,4 +327,8 @@
   .people-search-name { font-weight: 600; }
   .people-search-email { font-size: 12px; color: rgba(0,0,0,0.5); }
   .people-search-empty { padding: 12px; color: rgba(0,0,0,0.6); }
+  .people-search-action {
+    display: flex;
+    align-items: center;
+  }
   

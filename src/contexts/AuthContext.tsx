@@ -14,7 +14,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<boolean>;
   signup: (username: string, email: string, password: string) => Promise<boolean>;
   logout: () => void;
-  updateAvatar: (avatar: string) => void;
+  updateAvatar: (avatar: string) => Promise<void>;
   followUser: (userId: string) => void;
   unfollowUser: (userId: string) => void;
   getFollowingList: () => string[];
@@ -98,19 +98,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('user');
   };
 
-  const updateAvatar = (avatar: string) => {
+  const updateAvatar = async (avatar: string) => {
     if (!user) return;
     
-    const updatedUser = { ...user, avatar };
-    setUser(updatedUser);
-    localStorage.setItem('user', JSON.stringify(updatedUser));
-    
-    // Also update in users array
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const updatedUsers = users.map((u: any) => 
-      u.id === user.id ? { ...u, avatar } : u
-    );
-    localStorage.setItem('users', JSON.stringify(updatedUsers));
+    try {
+      console.log('Updating avatar for user:', user.id);
+      // Update avatar in Supabase
+      const response = await api.updateUserAvatar(user.id, avatar);
+      console.log('Avatar update response:', response);
+      
+      if (response && response.success && response.user) {
+        const updatedUser = {
+          id: response.user.id,
+          username: response.user.username,
+          email: response.user.email,
+          avatar: response.user.avatar || null,
+        };
+        console.log('Avatar updated successfully, new avatar:', updatedUser.avatar ? 'present' : 'null');
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      } else {
+        console.warn('Avatar update response missing success or user data');
+        // Fallback: update local state even if API call fails
+        const updatedUser = { ...user, avatar };
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+    } catch (error) {
+      console.error('Failed to update avatar in Supabase:', error);
+      // Fallback: update local state even if API call fails
+      const updatedUser = { ...user, avatar };
+      setUser(updatedUser);
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+    }
   };
 
   const followUser = (userId: string) => {

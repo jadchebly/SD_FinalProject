@@ -64,6 +64,62 @@
   font-size: 16px;
 }
 
+.profile-follow-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.follow-button {
+  padding: 10px 24px;
+  font-size: 15px;
+  font-weight: 500;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  background-color: #0066ff;
+  color: white;
+  min-width: 100px;
+}
+
+.follow-button:hover {
+  background-color: #0052cc;
+  border-color: #0052cc;
+}
+
+.follow-button.following {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.8);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.follow-button.following:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.follow-counts {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  justify-content: center;
+}
+
+.follow-counts span {
+  font-size: 15px;
+  color: #1a1a1a;
+  font-weight: 500;
+  cursor: default;
+  transition: color 0.2s ease-in-out;
+}
+
+.follow-counts span:hover {
+  color: #0066ff;
+}
+
 .change-photo-btn {
   width: 100%;
   padding: 14px;
@@ -227,6 +283,16 @@
   color: rgba(0, 0, 0, 0.6);
 }
 
+.profile-post-comments span {
+  cursor: pointer;
+  transition: color 0.2s ease-in-out;
+}
+
+.profile-post-comments span:hover {
+  color: #0066ff;
+  text-decoration: underline;
+}
+
 /* Like button and comment input styles */
 .profile-like-btn {
   background: transparent;
@@ -238,6 +304,11 @@
   justify-content: center;
   cursor: pointer;
 }
+.comment-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 .profile-like-btn.liked .profile-like-icon {
   color: #ff4444;
 }
@@ -246,25 +317,4 @@
   color: rgba(0,0,0,0.6);
 }
 
-.profile-comment-input {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-  align-items: center;
-}
-.profile-comment-input input {
-  flex: 1;
-  height: 36px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(0,0,0,0.08);
-}
-.profile-comment-input button {
-  background: #0066ff;
-  color: white;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-}
 

@@ -217,6 +217,7 @@ app.post('/api/login', async (req, res) => {
     }
 
     console.log('Login successful for:', user.username);
+    console.log('User avatar_url from DB:', user.avatar_url ? `present (length: ${user.avatar_url.length})` : 'null/empty');
 
     res.json({
       success: true,
@@ -224,7 +225,7 @@ app.post('/api/login', async (req, res) => {
         id: user.id,
         username: user.username,
         email: user.email,
-        avatar: user.avatar_url || null,
+        avatar: user.avatar_url && user.avatar_url.trim() !== '' ? user.avatar_url : null,
       },
     });
   } catch (error: any) {
@@ -366,6 +367,187 @@ app.delete('/api/follow/:userId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error?.message || 'Failed to unfollow user',
+    });
+  }
+});
+
+// Update user avatar
+app.put('/api/users/:id/avatar', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { avatar_url } = req.body;
+    const currentUserId = req.headers['x-user-id'] as string;
+
+    if (!currentUserId || currentUserId !== id) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    if (!avatar_url || (typeof avatar_url === 'string' && avatar_url.trim() === '')) {
+      return res.status(400).json({ error: 'Avatar URL is required' });
+    }
+
+    // Normalize: convert empty string to null
+    const normalizedAvatarUrl = (typeof avatar_url === 'string' && avatar_url.trim() === '') ? null : avatar_url;
+    
+    console.log(`Updating avatar for user ${id}, avatar_url length: ${normalizedAvatarUrl?.length || 0}`);
+
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ avatar_url: normalizedAvatarUrl })
+      .eq('id', id)
+      .select('id, username, email, avatar_url')
+      .single();
+
+    if (error) {
+      console.error('Supabase update error:', error);
+      throw error;
+    }
+
+    if (!updatedUser) {
+      throw new Error('User not found after update');
+    }
+
+    console.log(`Avatar updated successfully for user ${id}, avatar_url: ${updatedUser.avatar_url ? 'present' : 'null'}`);
+
+    res.json({
+      success: true,
+      user: {
+        id: updatedUser.id,
+        username: updatedUser.username,
+        email: updatedUser.email,
+        avatar: updatedUser.avatar_url || null,
+      },
+    });
+  } catch (error: any) {
+    console.error('Update avatar error:', error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to update avatar',
+    });
+  }
+});
+
+// Get followers list
+app.get('/api/users/:id/followers', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const currentUserId = req.headers['x-user-id'] as string;
+
+    // Get all users who follow this user
+    const { data: follows, error: followsError } = await supabase
+      .from('follows')
+      .select('follower_id')
+      .eq('following_id', id);
+
+    if (followsError) {
+      throw followsError;
+    }
+
+    const followerIds = follows?.map(f => f.follower_id) || [];
+    
+    if (followerIds.length === 0) {
+      return res.json({ success: true, users: [] });
+    }
+
+    // Get user details for followers
+    const { data: users, error: usersError } = await supabase
+      .from('users')
+      .select('id, username, email, avatar_url')
+      .in('id', followerIds);
+
+    if (usersError) {
+      throw usersError;
+    }
+
+    // Get follow status for each user (if current user is logged in)
+    let followingIds = new Set<string>();
+    if (currentUserId) {
+      const { data: currentUserFollows } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', currentUserId)
+        .in('following_id', followerIds);
+      
+      followingIds = new Set(currentUserFollows?.map(f => f.following_id) || []);
+    }
+
+    const usersWithFollowStatus = users?.map(user => ({
+      ...user,
+      isFollowing: followingIds.has(user.id),
+    })) || [];
+
+    res.json({
+      success: true,
+      users: usersWithFollowStatus,
+    });
+  } catch (error: any) {
+    console.error('Get followers error:', error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to get followers',
+    });
+  }
+});
+
+// Get following list
+app.get('/api/users/:id/following', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const currentUserId = req.headers['x-user-id'] as string;
+
+    // Get all users this user follows
+    const { data: follows, error: followsError } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', id);
+
+    if (followsError) {
+      throw followsError;
+    }
+
+    const followingIds = follows?.map(f => f.following_id) || [];
+    
+    if (followingIds.length === 0) {
+      return res.json({ success: true, users: [] });
+    }
+
+    // Get user details for following
+    const { data: users, error: usersError } = await supabase
+      .from('users')
+      .select('id, username, email, avatar_url')
+      .in('id', followingIds);
+
+    if (usersError) {
+      throw usersError;
+    }
+
+    // For following list, all users are already being followed by the profile owner
+    // But we need to check if current user follows them
+    let currentUserFollowingIds = new Set<string>();
+    if (currentUserId) {
+      const { data: currentUserFollows } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', currentUserId)
+        .in('following_id', followingIds);
+      
+      currentUserFollowingIds = new Set(currentUserFollows?.map(f => f.following_id) || []);
+    }
+
+    const usersWithFollowStatus = users?.map(user => ({
+      ...user,
+      isFollowing: currentUserFollowingIds.has(user.id),
+    })) || [];
+
+    res.json({
+      success: true,
+      users: usersWithFollowStatus,
+    });
+  } catch (error: any) {
+    console.error('Get following error:', error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to get following',
     });
   }
 });
@@ -617,6 +799,59 @@ app.post('/api/posts/:id/comments', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error?.message || 'Failed to add comment',
+    });
+  }
+});
+
+// Get suggested users (users not followed by current user, excluding current user)
+app.get('/api/users/suggested', async (req, res) => {
+  try {
+    const currentUserId = req.headers['x-user-id'] as string;
+
+    if (!currentUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Get list of users being followed
+    const { data: follows } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', currentUserId);
+
+    const followingIds = follows?.map(f => f.following_id) || [];
+    // Include current user ID to exclude from results
+    const excludeIds = [...followingIds, currentUserId];
+
+    // Get all users
+    const { data: allUsers, error } = await supabase
+      .from('users')
+      .select('id, username, email, avatar_url');
+
+    if (error) {
+      throw error;
+    }
+
+    // Filter out current user and already followed users
+    const users = allUsers?.filter(u => !excludeIds.includes(u.id)) || [];
+
+    // Randomly select up to 5 users
+    const shuffled = users ? [...users].sort(() => 0.5 - Math.random()) : [];
+    const selected = shuffled.slice(0, 5);
+
+    res.json({
+      success: true,
+      users: selected.map(user => ({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        avatar: user.avatar_url || undefined,
+      })),
+    });
+  } catch (error: any) {
+    console.error('Get suggested users error:', error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to get suggested users',
     });
   }
 });
