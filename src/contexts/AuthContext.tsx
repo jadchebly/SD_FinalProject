@@ -125,6 +125,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       following[user.id].push(userId);
       localStorage.setItem('following', JSON.stringify(following));
     }
+    // Also notify backend (fire-and-forget). Backend will persist follow relationship.
+    (async () => {
+      try {
+        await api.followUser(userId);
+      } catch (err) {
+        console.warn('Failed to notify backend of follow:', err);
+      }
+    })();
+    // Notify app that following list changed so components (feed) can refresh
+    try {
+      window.dispatchEvent(new CustomEvent('followingChanged', { detail: { userId, action: 'follow' } }));
+    } catch (e) {
+      // ignore
+    }
   };
 
   const unfollowUser = (userId: string) => {
@@ -134,6 +148,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (following[user.id]) {
       following[user.id] = following[user.id].filter((id: string) => id !== userId);
       localStorage.setItem('following', JSON.stringify(following));
+    }
+
+    // Also notify backend (fire-and-forget)
+    (async () => {
+      try {
+        await api.unfollowUser(userId);
+      } catch (err) {
+        console.warn('Failed to notify backend of unfollow:', err);
+      }
+    })();
+    // Notify app that following list changed so components (feed) can refresh
+    try {
+      window.dispatchEvent(new CustomEvent('followingChanged', { detail: { userId, action: 'unfollow' } }));
+    } catch (e) {
+      // ignore
     }
   };
 

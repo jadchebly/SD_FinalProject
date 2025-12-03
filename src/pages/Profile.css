@@ -227,3 +227,44 @@
   color: rgba(0, 0, 0, 0.6);
 }
 
+/* Like button and comment input styles */
+.profile-like-btn {
+  background: transparent;
+  border: none;
+  padding: 6px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.profile-like-btn.liked .profile-like-icon {
+  color: #ff4444;
+}
+.profile-like-btn .profile-like-icon {
+  font-size: 18px;
+  color: rgba(0,0,0,0.6);
+}
+
+.profile-comment-input {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+.profile-comment-input input {
+  flex: 1;
+  height: 36px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+.profile-comment-input button {
+  background: #0066ff;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+

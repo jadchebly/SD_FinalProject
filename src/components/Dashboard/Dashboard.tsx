@@ -27,42 +27,48 @@ export default function Dashboard() {
   const commentInputRef = useRef<HTMLInputElement>(null);
 
   // Load posts from API feed
+  const fetchFeed = async () => {
+    if (!user) {
+      setPosts([]);
+      setFilteredPosts([]);
+      return;
+    }
+
+    try {
+      const response = await api.getFeed();
+      if (response.success && response.posts) {
+        // Transform API posts to match Post type
+        const transformedPosts: Post[] = response.posts.map((p: any) => ({
+          id: p.id,
+          title: p.title,
+          content: p.content,
+          type: p.type,
+          image: p.image_url || undefined,
+          videoLink: p.video_url || undefined,
+          createdAt: p.created_at,
+          user: p.user || p.users?.username || 'Unknown',
+          likes: p.likes || 0,
+          likers: p.likers || [],
+          comments: [], // Will be loaded separately if needed
+        }));
+        setPosts(transformedPosts);
+      }
+    } catch (error) {
+      console.error('Failed to load feed:', error);
+      // Show error message to user
+      setPosts([]);
+    }
+  };
+
   useEffect(() => {
-    const loadPosts = async () => {
-      if (!user) {
-        setPosts([]);
-        setFilteredPosts([]);
-        return;
-      }
+    fetchFeed();
+  }, [user]);
 
-      try {
-        const response = await api.getFeed();
-        if (response.success && response.posts) {
-          // Transform API posts to match Post type
-          const transformedPosts: Post[] = response.posts.map((p: any) => ({
-            id: p.id,
-            title: p.title,
-            content: p.content,
-            type: p.type,
-            image: p.image_url || undefined,
-            videoLink: p.video_url || undefined,
-            createdAt: p.created_at,
-            user: p.user || p.users?.username || 'Unknown',
-            likes: p.likes || 0,
-            likers: p.likers || [],
-            comments: [], // Will be loaded separately if needed
-          }));
-          
-          setPosts(transformedPosts);
-        }
-      } catch (error) {
-        console.error('Failed to load feed:', error);
-        // Show error message to user
-        setPosts([]);
-      }
-    };
-
-    loadPosts();
+  // Refresh feed when following list changes
+  useEffect(() => {
+    const handler = () => fetchFeed();
+    window.addEventListener('followingChanged', handler as EventListener);
+    return () => window.removeEventListener('followingChanged', handler as EventListener);
   }, [user]);
 
   // Filter posts based on search query
@@ -226,10 +232,10 @@ export default function Dashboard() {
     }
   };
 
-  const handleCommentSubmit = (e: React.FormEvent, postId: string) => {
+  const handleCommentSubmit = async (e: React.FormEvent, postId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     const commentText = commentInputs[postId]?.trim();
     if (!commentText) return;
 
@@ -238,38 +244,49 @@ export default function Dashboard() {
       return;
     }
 
-    const newComment: Comment = {
-      id: crypto.randomUUID(),
-      text: commentText,
-      user: user.username,
-      userPhoto: user.avatar && user.avatar !== 'default' ? user.avatar : undefined,
-      createdAt: new Date().toISOString(),
-    };
-
-    setPosts((prevPosts) => {
-      const updatedPosts = prevPosts.map((post) => {
-        if (post.id === postId) {
-          return {
-            ...post,
-            comments: [...(post.comments || []), newComment],
-          };
-        }
-        return post;
-      });
-
-      // Update selectedPost if it's the same post
-      if (selectedPost && selectedPost.id === postId) {
-        const updatedPost = updatedPosts.find(p => p.id === postId);
-        if (updatedPost) {
-          setSelectedPost(updatedPost);
-        }
-      }
-
-      return updatedPosts;
-    });
-    
-    // Clear comment input
+    // Clear input immediately for snappy UX
     setCommentInputs({ ...commentInputs, [postId]: "" });
+
+    try {
+      const response = await api.addComment(postId, commentText);
+      if (response && response.success && response.comment) {
+        const serverComment = response.comment;
+        const formattedComment: Comment = {
+          id: serverComment.id,
+          text: serverComment.text,
+          user: serverComment.user,
+          userPhoto: serverComment.userPhoto || undefined,
+          createdAt: serverComment.createdAt,
+        };
+
+        setPosts((prevPosts) => {
+          const updatedPosts = prevPosts.map((post) => {
+            if (post.id === postId) {
+              return {
+                ...post,
+                comments: [...(post.comments || []), formattedComment],
+              };
+            }
+            return post;
+          });
+
+          // Update selectedPost if it's the same post
+          if (selectedPost && selectedPost.id === postId) {
+            const updatedPost = updatedPosts.find(p => p.id === postId);
+            if (updatedPost) {
+              setSelectedPost(updatedPost);
+            }
+          }
+
+          return updatedPosts;
+        });
+      } else {
+        console.error('Unexpected response from addComment', response);
+      }
+    } catch (error) {
+      console.error('Failed to add comment via API:', error);
+      // optionally restore input or show message
+    }
   };
 
   const handleCommentInputChange = (postId: string, value: string) => {
@@ -485,9 +502,10 @@ export default function Dashboard() {
 
     return () => {
       document.removeEventListener("keydown", handleEscape);
-      if (!selectedPost && !showDeletePostConfirm) {
-        document.body.style.overflow = "unset";
-      }
+      // Always restore body overflow when the effect cleans up to avoid leaving
+      // the document unscrollable if the effect's captured values prevented
+      // the previous cleanup from unsetting it.
+      document.body.style.overflow = "unset";
     };
   }, [selectedPost, showDeletePostConfirm]);
 
