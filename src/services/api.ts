@@ -1,6 +1,74 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+type HeaderProvider = () => Promise<Record<string,string>> | Record<string,string>;
+type UserProvider = () => any;
+
 class ApiService {
+  private authHeaderProvider: HeaderProvider | null = null;
+  private currentUserProvider: UserProvider | null = null;
+
+  setAuthHeaderProvider(provider: HeaderProvider) {
+    this.authHeaderProvider = provider;
+  }
+
+  setCurrentUserProvider(provider: UserProvider) {
+    this.currentUserProvider = provider;
+  }
+
+  private async getAuthHeaders(): Promise<Record<string,string>> {
+    try {
+      if (!this.authHeaderProvider) return {};
+      const result = this.authHeaderProvider();
+      if (result instanceof Promise) return await result;
+      return result;
+    } catch (e) {
+      console.warn('Auth header provider failed', e);
+      return {};
+    }
+  }
+
+  private getCurrentUser(): any {
+    try {
+      if (!this.currentUserProvider) return null;
+      return this.currentUserProvider();
+    } catch (e) {
+      console.warn('Current user provider failed', e);
+      return null;
+    }
+  }
+
+  // Convenience method to rehydrate current user from server
+  async getMe(): Promise<any> {
+    const response = await fetch(`${API_URL}/api/me`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...await this.getAuthHeaders(),
+      },
+    });
+
+    if (!response.ok) throw new Error('Failed to get current user');
+    return response.json();
+  }
+
+  async getFollowing(): Promise<any> {
+    const response = await fetch(`${API_URL}/api/following`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...await this.getAuthHeaders(),
+      },
+    });
+
+    if (!response.ok) throw new Error('Failed to get following list');
+    return response.json();
+  }
+
+  // ... rest of methods follow, using getAuthHeaders() and getCurrentUser()
+
+  
   async uploadImage(file: File): Promise<{ url: string; path: string }> {
     const formData = new FormData();
     formData.append('image', file);
@@ -42,20 +110,21 @@ class ApiService {
     user_id?: string;
     username?: string;
   }): Promise<any> {
-    const token = localStorage.getItem('token');
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    
+    const user = this.getCurrentUser() || {};
+    const headers = await this.getAuthHeaders();
+
     const response = await fetch(`${API_URL}/api/posts`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
       body: JSON.stringify({
         ...post,
-        user_id: user.id,
-        username: user.username,
+        // preserve previous behavior: include current user id/username if available
+        user_id: post.user_id || user?.id,
+        username: post.username || user?.username,
       }),
     });
 
@@ -78,13 +147,13 @@ class ApiService {
   }
 
   async updatePost(postId: string, title: string, content: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    
+    const headers = await this.getAuthHeaders();
+
     const response = await fetch(`${API_URL}/api/posts/${postId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
       body: JSON.stringify({ title, content }),
     });
@@ -104,17 +173,19 @@ class ApiService {
   }
 
   async deletePost(postId: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const user = this.getCurrentUser() || {};
+    const headers = await this.getAuthHeaders();
     
     console.log('📡 API: Deleting post', postId);
-    console.log('📡 API: User ID:', user.id);
+    console.log('📡 API: User ID:', user?.id);
     console.log('📡 API: Request URL:', `${API_URL}/api/posts/${postId}`);
     
     const response = await fetch(`${API_URL}/api/posts/${postId}`, {
       method: 'DELETE',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
     });
 
@@ -151,6 +222,7 @@ class ApiService {
   async login(email: string, password: string): Promise<any> {
     const response = await fetch(`${API_URL}/api/login`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -174,6 +246,7 @@ class ApiService {
   async signup(username: string, email: string, password: string): Promise<any> {
     const response = await fetch(`${API_URL}/api/signup`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
       },
@@ -194,14 +267,31 @@ class ApiService {
     return response.json();
   }
 
+  async logout(): Promise<any> {
+    const response = await fetch(`${API_URL}/api/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...await this.getAuthHeaders(),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to logout');
+    }
+
+    return response.json();
+  }
+
   async getFeed(): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    
+    const headers = await this.getAuthHeaders();
+
     const response = await fetch(`${API_URL}/api/feed`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
     });
 
@@ -213,13 +303,13 @@ class ApiService {
   }
 
   async getUserProfile(userId: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    
+    const headers = await this.getAuthHeaders();
+
     const response = await fetch(`${API_URL}/api/users/${userId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
     });
 
@@ -230,14 +320,31 @@ class ApiService {
     return response.json();
   }
 
+  async getSuggestedUsers(): Promise<any> {
+    const headers = await this.getAuthHeaders();
+    const response = await fetch(`${API_URL}/api/users/suggested`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get suggested users');
+    }
+
+    return response.json();
+  }
+
   async followUser(userId: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = await this.getAuthHeaders();
     
     const response = await fetch(`${API_URL}/api/follow/${userId}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
     });
 
@@ -256,13 +363,13 @@ class ApiService {
   }
 
   async unfollowUser(userId: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = await this.getAuthHeaders();
     
     const response = await fetch(`${API_URL}/api/follow/${userId}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
     });
 
@@ -336,13 +443,13 @@ class ApiService {
   }
 
   async likePost(postId: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = await this.getAuthHeaders();
     
     const response = await fetch(`${API_URL}/api/posts/${postId}/like`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
     });
 
@@ -354,13 +461,13 @@ class ApiService {
   }
 
   async unlikePost(postId: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = await this.getAuthHeaders();
     
     const response = await fetch(`${API_URL}/api/posts/${postId}/like`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
     });
 
@@ -387,13 +494,13 @@ class ApiService {
   }
 
   async addComment(postId: string, text: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = await this.getAuthHeaders();
     
     const response = await fetch(`${API_URL}/api/posts/${postId}/comments`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
       body: JSON.stringify({ text }),
     });
@@ -406,13 +513,13 @@ class ApiService {
   }
 
   async searchUsers(query: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = await this.getAuthHeaders();
     
     const response = await fetch(`${API_URL}/api/users/search/${encodeURIComponent(query)}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
     });
 
@@ -442,13 +549,13 @@ class ApiService {
   }
 
   async getUserPosts(userId: string): Promise<any> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = await this.getAuthHeaders();
     
     const response = await fetch(`${API_URL}/api/posts?user_id=${userId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        ...(user.id && { 'x-user-id': user.id }),
+        ...headers,
       },
     });
 
