@@ -6,9 +6,10 @@ import { AiFillLike } from "react-icons/ai";
 import { GiEgyptianProfile } from "react-icons/gi";
 import { useAuth } from "../../contexts/AuthContext";
 import { FiEdit2 } from "react-icons/fi";
+import SuggestedUsersModal from "../SuggestedUsersModal";
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, getFollowingList } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
   const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
@@ -18,6 +19,7 @@ export default function Dashboard() {
   const [editFormData, setEditFormData] = useState({ title: "", content: "", videoLink: "" });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
+  const [showSuggestedUsers, setShowSuggestedUsers] = useState(false);
 
   // Filter posts based on current user and search query
   useEffect(() => {
@@ -74,6 +76,29 @@ export default function Dashboard() {
     window.addEventListener("searchUpdate", handleSearchUpdate);
     return () => window.removeEventListener("searchUpdate", handleSearchUpdate);
   }, [posts, user]);
+
+  // Show suggested users modal when dashboard loads if user follows 0 users
+  useEffect(() => {
+    if (user) {
+      const checkFollowingCount = () => {
+        const followingList = getFollowingList();
+        // Show modal if user follows 0 users
+        if (followingList.length === 0) {
+          setShowSuggestedUsers(true);
+        } else {
+          setShowSuggestedUsers(false);
+        }
+      };
+      
+      // Check immediately
+      checkFollowingCount();
+      
+      // Also check periodically to catch changes from other tabs/components
+      const interval = setInterval(checkFollowingCount, 1000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [user, getFollowingList]);
 
   // for now, use local storage until we have a backend
   useEffect(() => {
@@ -702,6 +727,12 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* Suggested Users Modal */}
+        <SuggestedUsersModal 
+          isOpen={showSuggestedUsers} 
+          onClose={() => setShowSuggestedUsers(false)}
+        />
       </div>
     </div>
   );
