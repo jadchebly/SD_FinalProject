@@ -51,20 +51,10 @@ export default function SuggestedUsersModal({ isOpen, onClose }: SuggestedUsersM
         })));
         return;
       }
+      // If API returned no users, set empty
+      setSuggestedUsers([]);
     } catch (e) {
-      console.warn('Failed to load suggested users from API, falling back to localStorage', e);
-    }
-
-    // Fallback: use localStorage (existing behavior)
-    try {
-      const allUsers = JSON.parse(localStorage.getItem('users') || '[]');
-      const followingList = getFollowingList();
-      const availableUsers = allUsers.filter((u: any) => u.id !== user.id && !followingList.includes(u.id));
-      const shuffled = [...availableUsers].sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, 5);
-      setSuggestedUsers(selected.map((u: any) => ({ id: u.id, username: u.username, email: u.email, avatar: u.avatar })));
-    } catch (e) {
-      console.error('Failed to load fallback suggested users', e);
+      console.warn('Failed to load suggested users from API', e);
       setSuggestedUsers([]);
     }
   };
