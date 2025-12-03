@@ -2,8 +2,8 @@ import Navbar from "../components/Dashboard/Navbar/Navbar";
 import "./CreatePost.css";
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Post } from "../types/Post";
 import { useAuth } from "../contexts/AuthContext";
+import api from "../services/api";
 
 export default function CreatePost() {
   const navigate = useNavigate();
@@ -14,8 +14,10 @@ export default function CreatePost() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const [image, setImage] = useState("");
+  const [imageFile, setImageFile] = useState<File | Blob | null>(null); // Store original file/blob for upload
   const [videoLink, setVideoLink] = useState("");
   const [recordedVideo, setRecordedVideo] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   // recording state
   const [recording, setRecording] = useState(false);
@@ -138,12 +140,28 @@ export default function CreatePost() {
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const photo = canvas.toDataURL("image/png");
-    // Compress the image
-    const compressedPhoto = await compressImage(photo);
-    setImage(compressedPhoto);
+    // Convert canvas to blob and store for later upload
+    canvas.toBlob(async (blob) => {
+      if (!blob) {
+        console.error("Failed to create blob from canvas");
+        const photo = canvas.toDataURL("image/png");
+        const compressedPhoto = await compressImage(photo);
+        setImage(compressedPhoto);
+        setType("photo");
+        stopCamera();
+        return;
+      }
 
-    stopCamera();
+      // Store blob for later upload
+      setImageFile(blob);
+      
+      // Show preview (data URL)
+      const photo = canvas.toDataURL("image/png");
+      const compressedPhoto = await compressImage(photo);
+      setImage(compressedPhoto);
+      setType("photo");
+      stopCamera();
+    }, 'image/jpeg', 0.8);
   };
 
   /* ------------------------------------
@@ -225,10 +243,13 @@ export default function CreatePost() {
       return;
     }
 
+    // Store file for later upload
+    setImageFile(file);
+    
+    // Show preview (data URL)
     const reader = new FileReader();
     reader.onload = async () => {
       const dataUrl = reader.result as string;
-      // Compress the uploaded image
       const compressedImage = await compressImage(dataUrl);
       setImage(compressedImage);
       setType("photo");
@@ -280,88 +301,55 @@ export default function CreatePost() {
       return;
     }
 
-    const newPost: Post = {
-      id: crypto.randomUUID(),
-      title,
-      content,
-      type: type as "blurb" | "photo" | "video",
-      image: image || undefined,
-      videoLink: videoLink || undefined,
-      recordedVideo: recordedVideo || undefined,
-      createdAt: new Date().toISOString(),
-      user: user.username,
-      likers: [],
-    };
+    setUploading(true);
+    let imageUrl = image; // Default to current image (might be data URL or already uploaded)
 
-    // Get existing posts from localStorage
-    const existingPosts = localStorage.getItem("posts");
-    let posts: Post[] = existingPosts ? JSON.parse(existingPosts) : [];
-    
-    // Compress image if present
-    let finalPost = { ...newPost };
-    if (finalPost.image) {
-      try {
-        finalPost.image = await compressImage(finalPost.image, 1920, 0.7);
-      } catch (error) {
-        console.error("Error compressing image:", error);
-      }
-    }
-    
-    // Add new post
-    posts.push(finalPost);
-    
-    // Keep only the most recent 50 posts to prevent quota exceeded
-    if (posts.length > 50) {
-      posts = posts
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 50);
-    }
-    
-    // Save back to localStorage with error handling
     try {
-      const postsJson = JSON.stringify(posts);
-      // Check if data is too large (rough estimate: 4MB limit for safety)
-      if (postsJson.length > 4 * 1024 * 1024) {
-        // If too large, remove oldest posts
-        const sortedPosts = posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        let reducedPosts = sortedPosts;
-        while (JSON.stringify(reducedPosts).length > 3 * 1024 * 1024 && reducedPosts.length > 1) {
-          reducedPosts = reducedPosts.slice(0, -1);
-        }
-        localStorage.setItem("posts", JSON.stringify(reducedPosts));
-        alert("Storage limit reached. Some older posts were removed to make space.");
-      } else {
-        localStorage.setItem("posts", postsJson);
+      // Step 1: Upload image if we have a file/blob to upload
+      if (imageFile && image.startsWith('data:')) {
+        // Convert blob to File if needed
+        const file = imageFile instanceof File 
+          ? imageFile 
+          : new File([imageFile], 'image.jpg', { type: 'image/jpeg' });
+        
+        console.log('Uploading image to storage...');
+        const uploadResult = await api.uploadImage(file);
+        imageUrl = uploadResult.url;
+        console.log('Image uploaded:', imageUrl);
       }
+
+      // Step 2: Save post to database
+      const postData = {
+        title,
+        content,
+        type: type as string,
+        image_url: imageUrl && !imageUrl.startsWith('data:') && imageUrl.trim() !== '' ? imageUrl : null,
+        video_url: videoLink && videoLink.trim() !== '' ? videoLink : null,
+        user_id: user.id,
+        username: user.username,
+      };
+
+      console.log('Creating post in database...');
+      const createResult = await api.createPost(postData);
+      console.log('Post created successfully:', createResult.post?.id);
+
+      // Reset form
+      setTitle("");
+      setContent("");
+      setImage("");
+      setImageFile(null);
+      setVideoLink("");
+      setRecordedVideo(null);
+      setType("blurb");
+
+      // Show success modal
+      setShowSuccessModal(true);
     } catch (error) {
-      if (error instanceof DOMException && error.name === "QuotaExceededError") {
-        // Remove oldest posts and try again
-        const sortedPosts = posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        let reducedPosts = sortedPosts.slice(0, Math.floor(sortedPosts.length * 0.8));
-        try {
-          localStorage.setItem("posts", JSON.stringify(reducedPosts));
-          alert("Storage limit reached. Some older posts were removed. Please try submitting again.");
-        } catch (retryError) {
-          alert("Storage is full. Please clear some posts or use a different browser.");
-          return;
-        }
-      } else {
-        console.error("Error saving post:", error);
-        alert("Error saving post. Please try again.");
-        return;
-      }
+      console.error("Error creating post:", error);
+      alert(`Failed to create post: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setUploading(false);
     }
-
-    // Reset form
-    setTitle("");
-    setContent("");
-    setImage("");
-    setVideoLink("");
-    setRecordedVideo(null);
-    setType("blurb");
-
-    // Show success modal
-    setShowSuccessModal(true);
   };
 
   const handleSuccessOk = () => {
@@ -380,8 +368,9 @@ export default function CreatePost() {
       setRecordedVideo(null);
     }
 
-    // clear image preview
+    // clear image preview and file
     setImage("");
+    setImageFile(null);
     // reset type to default
     setType("blurb");
   };
@@ -458,8 +447,9 @@ export default function CreatePost() {
                       type="button"
                       className="capture-btn"
                       onClick={capturePhoto}
+                      disabled={uploading}
                     >
-                      Capture Photo
+                      {uploading ? "Uploading..." : "Capture Photo"}
                     </button>
                   )}
 
@@ -542,15 +532,16 @@ export default function CreatePost() {
             />
 
             <div
-              className={`drop-zone ${dragActive ? "drag-active" : ""}`}
+              className={`drop-zone ${dragActive ? "drag-active" : ""} ${uploading ? "uploading" : ""}`}
               onDragEnter={handleDrag}
               onDragOver={handleDrag}
               onDragLeave={handleDrag}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => !uploading && fileInputRef.current?.click()}
+              style={{ opacity: uploading ? 0.6 : 1, pointerEvents: uploading ? 'none' : 'auto' }}
             >
               <p style={{ margin: 0 }}>
-                Drag & drop an image here, or click to select (optional)
+                {uploading ? "Uploading image..." : "Drag & drop an image here, or click to select (optional)"}
               </p>
             </div>
           </div>
@@ -566,8 +557,8 @@ export default function CreatePost() {
             />
           </div>
 
-          <button className="submit-btn" type="submit">
-            Post
+          <button className="submit-btn" type="submit" disabled={uploading}>
+            {uploading ? "Posting..." : "Post"}
           </button>
         </form>
       </div>
