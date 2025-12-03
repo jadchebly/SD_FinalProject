@@ -18,6 +18,8 @@ interface AuthContextType {
   followUser: (userId: string) => Promise<void>;
   unfollowUser: (userId: string) => Promise<void>;
   getFollowingList: () => string[];
+  hasSeenSuggested: (userId: string) => boolean;
+  markSeenSuggested: (userId: string) => void;
   isAuthenticated: boolean;
   isLoading: boolean;
 }
@@ -27,20 +29,61 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [followingList, setFollowingList] = useState<string[]>([]);
+  const [seenSuggested, setSeenSuggested] = useState<Set<string>>(new Set());
 
-  // Load user from localStorage on mount
+  // Rehydrate user from backend on mount (DB-backed session)
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
+    let mounted = true;
+    const init = async () => {
       try {
-        setUser(JSON.parse(storedUser));
-      } catch (error) {
-        console.error('Error parsing stored user:', error);
-        localStorage.removeItem('user');
+        const res = await api.getMe();
+        if (!mounted) return;
+        if (res && res.success && res.user) {
+          setUser(res.user);
+        } else {
+          setUser(null);
+        }
+
+        if (res && res.success && res.user) {
+          try {
+            const f = await api.getFollowing();
+            if (f && f.success) setFollowingList(f.following || []);
+          } catch (e) {
+            console.warn('Failed to load following list', e);
+            setFollowingList([]);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to rehydrate user:', e);
+        setUser(null);
+      } finally {
+        if (mounted) setIsLoading(false);
       }
-    }
-    setIsLoading(false);
+    };
+
+    init();
+
+    return () => { mounted = false; };
   }, []);
+
+    // Register providers with ApiService so it no longer reads localStorage
+    useEffect(() => {
+      api.setAuthHeaderProvider(() => {
+        // If you later switch to HttpOnly cookies, return {} here.
+        return { ...(user && user.id ? { 'x-user-id': user.id } : {}) };
+      });
+
+      api.setCurrentUserProvider(() => user);
+    }, [user]);
+
+    const hasSeenSuggested = (userId: string) => {
+      return seenSuggested.has(userId);
+    };
+
+    const markSeenSuggested = (userId: string) => {
+      setSeenSuggested(prev => new Set(prev).add(userId));
+    };
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
@@ -53,7 +96,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           avatar: response.user.avatar || null,
         };
         setUser(userData);
-        localStorage.setItem('user', JSON.stringify(userData));
+
+        // Refresh following list for the authenticated user
+        try {
+          const f = await api.getFollowing();
+          if (f && f.success) setFollowingList(f.following || []);
+        } catch (e) {
+          console.warn('Failed to load following after login', e);
+        }
+
         return true;
       }
       return false;
@@ -74,7 +125,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           avatar: response.user.avatar || null,
         };
         setUser(userData);
-        localStorage.setItem('user', JSON.stringify(userData));
+
+        // new users start with empty following
+        setFollowingList([]);
         return true;
       }
       return false;
@@ -89,13 +142,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
-    // Clear session storage flags for suggested users modal
-    // This ensures the modal will show again on next sign in
-    if (user) {
-      sessionStorage.removeItem(`suggestedUsersShown_${user.id}`);
+    // Clear in-memory state. If you later implement server sessions/cookies,
+    // call /api/logout to clear them server-side.
+    // Attempt to notify backend to clear session cookie
+    try {
+      api.logout().catch((e) => console.warn('Logout request failed', e));
+    } catch (e) {
+      // ignore
     }
+
     setUser(null);
-    localStorage.removeItem('user');
+    setFollowingList([]);
   };
 
   const updateAvatar = (avatar: string) => {
@@ -103,40 +160,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     const updatedUser = { ...user, avatar };
     setUser(updatedUser);
-    localStorage.setItem('user', JSON.stringify(updatedUser));
-    
-    // Also update in users array
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const updatedUsers = users.map((u: any) => 
-      u.id === user.id ? { ...u, avatar } : u
-    );
-    localStorage.setItem('users', JSON.stringify(updatedUsers));
+    // TODO: Consider calling backend to persist avatar change (if you add an endpoint)
   };
 
   const followUser = async (userId: string) => {
     if (!user) return;
-    
-    const following = JSON.parse(localStorage.getItem('following') || '{}');
-    if (!following[user.id]) {
-      following[user.id] = [];
-    }
-    
-    if (!following[user.id].includes(userId)) {
-      following[user.id].push(userId);
-      localStorage.setItem('following', JSON.stringify(following));
-    }
-    
-    // Update backend first, then notify app that following list changed
+
     try {
-      await api.followUser(userId);
-      console.log('Follow relationship saved to backend');
+      const res = await api.followUser(userId);
+      if (res && res.success) {
+        setFollowingList(prev => Array.from(new Set([...prev, userId])));
+      }
     } catch (err) {
-      console.warn('Failed to notify backend of follow:', err);
-      // Still dispatch event even if backend call fails, so UI updates
+      console.warn('Failed to follow on backend:', err);
     }
-    
-    // Notify app that following list changed so components (feed) can refresh
-    // Dispatch after backend call completes so feed refresh gets updated data
+
     try {
       window.dispatchEvent(new CustomEvent('followingChanged', { detail: { userId, action: 'follow' } }));
     } catch (e) {
@@ -146,24 +184,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const unfollowUser = async (userId: string) => {
     if (!user) return;
-    
-    const following = JSON.parse(localStorage.getItem('following') || '{}');
-    if (following[user.id]) {
-      following[user.id] = following[user.id].filter((id: string) => id !== userId);
-      localStorage.setItem('following', JSON.stringify(following));
+
+    try {
+      const res = await api.unfollowUser(userId);
+      if (res && res.success) {
+        setFollowingList(prev => prev.filter(id => id !== userId));
+      }
+    } catch (err) {
+      console.warn('Failed to unfollow on backend:', err);
     }
 
-    // Update backend first, then notify app that following list changed
-    try {
-      await api.unfollowUser(userId);
-      console.log('Unfollow relationship saved to backend');
-    } catch (err) {
-      console.warn('Failed to notify backend of unfollow:', err);
-      // Still dispatch event even if backend call fails, so UI updates
-    }
-    
-    // Notify app that following list changed so components (feed) can refresh
-    // Dispatch after backend call completes so feed refresh gets updated data
     try {
       window.dispatchEvent(new CustomEvent('followingChanged', { detail: { userId, action: 'unfollow' } }));
     } catch (e) {
@@ -172,10 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const getFollowingList = (): string[] => {
-    if (!user) return [];
-    
-    const following = JSON.parse(localStorage.getItem('following') || '{}');
-    return following[user.id] || [];
+    return followingList || [];
   };
 
   return (
@@ -188,6 +215,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       followUser,
       unfollowUser,
       getFollowingList,
+      hasSeenSuggested,
+      markSeenSuggested,
       isAuthenticated: !!user,
       isLoading
     }}>

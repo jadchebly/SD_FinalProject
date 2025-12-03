@@ -10,7 +10,7 @@ import api from "../../services/api";
 import SuggestedUsersModal from "../SuggestedUsersModal";
 
 export default function Dashboard() {
-  const { user, getFollowingList } = useAuth();
+  const { user, getFollowingList, hasSeenSuggested, markSeenSuggested } = useAuth();
   const [posts, setPosts] = useState<Post[]>([]);
   const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
@@ -116,23 +116,18 @@ export default function Dashboard() {
   // Show suggested users modal once when dashboard loads if user follows 0 users
   useEffect(() => {
     if (user) {
-      // Check if we've already shown the modal in this session
-      const hasShownModal = sessionStorage.getItem(`suggestedUsersShown_${user.id}`);
-      
-      if (!hasShownModal) {
-        const followingList = getFollowingList();
-        // Show modal if user follows 0 users
-        if (followingList.length === 0) {
-          // Small delay to ensure dashboard is rendered
-          setTimeout(() => {
-            setShowSuggestedUsers(true);
-            // Mark that we've shown the modal for this user in this session
-            sessionStorage.setItem(`suggestedUsersShown_${user.id}`, 'true');
-          }, 500);
-        }
+      const alreadySeen = hasSeenSuggested(user.id);
+      const followingList = getFollowingList();
+
+      if (!alreadySeen && followingList.length === 0) {
+        // Small delay to ensure dashboard is rendered
+        setTimeout(() => {
+          setShowSuggestedUsers(true);
+          markSeenSuggested(user.id);
+        }, 500);
       }
     }
-  }, [user, getFollowingList]);
+  }, [user, getFollowingList, hasSeenSuggested, markSeenSuggested]);
 
   // for now, use local storage until we have a backend
   useEffect(() => {

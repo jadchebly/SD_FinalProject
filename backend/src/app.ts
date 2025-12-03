@@ -175,6 +175,12 @@ app.post('/api/signup', async (req, res) => {
         avatar: newUser.avatar_url || null,
       },
     });
+    // Set a simple HttpOnly session cookie so frontend can rehydrate without localStorage
+    try {
+      res.cookie('sid', newUser.id, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
+    } catch (e) {
+      // ignore cookie errors
+    }
   } catch (error: any) {
     console.error('Signup error:', error);
     const errorMessage = error?.message || error?.error || 'Failed to create account';
@@ -227,12 +233,110 @@ app.post('/api/login', async (req, res) => {
         avatar: user.avatar_url || null,
       },
     });
+    // Set HttpOnly cookie on login so client can rehydrate session
+    try {
+      res.cookie('sid', user.id, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
+    } catch (e) {
+      // ignore cookie set errors
+    }
   } catch (error: any) {
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
       error: error?.message || 'Failed to login',
     });
+  }
+});
+
+// Get current authenticated user (rehydration endpoint)
+app.get('/api/me', async (req, res) => {
+  try {
+    let currentUserId = req.headers['x-user-id'] as string | undefined;
+    // If header not present, attempt to read cookie 'sid' from Cookie header
+    if (!currentUserId && req.headers.cookie) {
+      const cookieHeader = req.headers.cookie as string;
+      const cookies = Object.fromEntries(cookieHeader.split(';').map(c => {
+        const [k,v] = c.split('=');
+        return [k.trim(), decodeURIComponent((v||'').trim())];
+      }));
+      if (cookies['sid']) currentUserId = cookies['sid'];
+    }
+
+    if (!currentUserId) {
+      return res.status(200).json({ success: true, user: null });
+    }
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, username, email, avatar_url')
+      .eq('id', currentUserId)
+      .single();
+
+    if (error || !user) {
+      return res.status(200).json({ success: true, user: null });
+    }
+
+    return res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        avatar: user.avatar_url || null,
+      },
+    });
+  } catch (error: any) {
+    console.error('GET /api/me error:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Failed to get current user' });
+  }
+});
+
+// Get list of user ids that the current user is following
+app.get('/api/following', async (req, res) => {
+  try {
+    let currentUserId = req.headers['x-user-id'] as string | undefined;
+    if (!currentUserId && req.headers.cookie) {
+      const cookieHeader = req.headers.cookie as string;
+      const cookies = Object.fromEntries(cookieHeader.split(';').map(c => {
+        const [k,v] = c.split('=');
+        return [k.trim(), decodeURIComponent((v||'').trim())];
+      }));
+      if (cookies['sid']) currentUserId = cookies['sid'];
+    }
+
+    if (!currentUserId) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    const { data: follows, error } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', currentUserId);
+
+    if (error) throw error;
+
+    const followingIds = follows?.map((f: any) => f.following_id) || [];
+    res.json({ success: true, following: followingIds });
+  } catch (error: any) {
+    console.error('GET /api/following error:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Failed to get following list' });
+  }
+});
+
+// Logout endpoint (clears server session if any)
+app.post('/api/logout', async (req, res) => {
+  try {
+    // If you implement server-side sessions/cookies later, clear them here.
+    // For now, this is a no-op that returns success so frontend can clear in-memory state.
+    try {
+      res.clearCookie('sid');
+    } catch (e) {
+      // ignore
+    }
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('POST /api/logout error:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Failed to logout' });
   }
 });
 
