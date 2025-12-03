@@ -1,5 +1,6 @@
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import Navbar from '../components/Dashboard/Navbar/Navbar';
 import { GiEgyptianProfile } from 'react-icons/gi';
 import { useRef, useState, useEffect } from 'react';
@@ -10,13 +11,18 @@ import './Profile.css';
 import '../components/Dashboard/Dashboard.css';
 
 export default function Profile() {
-  const { user, logout, updateAvatar } = useAuth();
+  const { user, logout, updateAvatar, followUser, unfollowUser } = useAuth();
   const navigate = useNavigate();
+  const { id: paramId } = useParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [userPosts, setUserPosts] = useState<Post[]>([]);
+  const [profileInfo, setProfileInfo] = useState<any | null>(null);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editFormData, setEditFormData] = useState({ title: "", content: "" });
   const [showDeleteFromEditConfirm, setShowDeleteFromEditConfirm] = useState(false);
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const commentInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleLogout = () => {
     logout();
@@ -81,10 +87,11 @@ export default function Profile() {
   // Load user's posts from backend
   useEffect(() => {
     const loadUserPosts = async () => {
-      if (!user || !user.id) return;
+      const profileId = paramId || user?.id;
+      if (!profileId) return;
       
       try {
-        const response = await api.getUserPosts(user.id);
+        const response = await api.getUserPosts(profileId);
         if (response.success && response.posts) {
           // Transform API posts to match Post type
           const transformedPosts: Post[] = response.posts.map((p: any) => ({
@@ -98,10 +105,33 @@ export default function Profile() {
             user: p.user || p.users?.username || 'Unknown',
             likes: p.likes || 0,
             likers: p.likers || [],
-            comments: [], // Comments can be loaded separately if needed
+            comments: [], // will load comments below
           }));
           
           setUserPosts(transformedPosts);
+
+          // Load comments for each post in parallel and attach them to posts
+          try {
+            await Promise.all(transformedPosts.map(async (post) => {
+              try {
+                const cRes = await api.getComments(post.id);
+                if (cRes && cRes.success && Array.isArray(cRes.comments)) {
+                  const mapped = cRes.comments.map((c: any) => ({
+                    id: c.id,
+                    text: c.text,
+                    user: (c.user && (c.user.username || c.user)) || c.user_id || 'Unknown',
+                    userPhoto: c.user?.avatar_url || c.userPhoto || undefined,
+                    createdAt: c.created_at || c.createdAt || new Date().toISOString(),
+                  }));
+                  setUserPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, comments: mapped } : p));
+                }
+              } catch (e) {
+                console.warn('Failed to load comments for post', post.id, e);
+              }
+            }));
+          } catch (e) {
+            console.warn('Failed to load comments for posts', e);
+          }
         } else {
           setUserPosts([]);
         }
@@ -117,7 +147,29 @@ export default function Profile() {
     const interval = setInterval(loadUserPosts, 30000);
     
     return () => clearInterval(interval);
-  }, [user]);
+  }, [user, paramId]);
+
+  // Load profile metadata (followers/following/isFollowing) when viewing someone else's profile
+  useEffect(() => {
+    const loadProfile = async () => {
+      const profileId = paramId || user?.id;
+      if (!profileId) return;
+
+      try {
+        const res = await api.getUserProfile(profileId);
+        if (res && res.success) {
+          setProfileInfo(res.user || res.profile || null);
+        } else {
+          setProfileInfo(null);
+        }
+      } catch (err) {
+        console.error('Failed to load profile info:', err);
+        setProfileInfo(null);
+      }
+    };
+
+    loadProfile();
+  }, [paramId, user]);
 
   const getTimeAgo = (createdAt: string): string => {
     const now = new Date();
@@ -240,11 +292,118 @@ export default function Profile() {
     }
   };
 
+  const handleLikeToggle = async (post: Post) => {
+    if (!user) return;
+    const userId = user.id;
+    const isLiked = post.likers?.includes(userId);
+    try {
+      if (isLiked) {
+        await api.unlikePost(post.id);
+        setUserPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, likers: (p.likers || []).filter(id => id !== userId) } : p));
+        if (selectedPost && selectedPost.id === post.id) {
+          setSelectedPost({ ...selectedPost, likers: (selectedPost.likers || []).filter(id => id !== userId) });
+        }
+      } else {
+        await api.likePost(post.id);
+        setUserPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, likers: [...(p.likers || []), userId] } : p));
+        if (selectedPost && selectedPost.id === post.id) {
+          setSelectedPost({ ...selectedPost, likers: [...(selectedPost.likers || []), userId] });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to toggle like:', err);
+    }
+  };
+
+  const handleCommentChange = (postId: string, value: string) => {
+    setCommentInputs((prev) => ({ ...prev, [postId]: value }));
+  };
+
+  const handleAddComment = async (postId: string) => {
+    if (!user) return;
+    const text = (commentInputs[postId] || '').trim();
+    if (!text) return;
+    try {
+      const res = await api.addComment(postId, text);
+      if (res && res.success) {
+        // Normalize backend comment to Comment shape
+        const c = res.comment;
+        const newComment = {
+          id: c?.id ?? `c_${Date.now()}`,
+          text,
+          user: typeof c?.user === 'string' ? c.user : (c?.user?.username ?? user.username),
+          userPhoto: c?.userPhoto ?? c?.user?.avatar_url ?? undefined,
+          createdAt: c?.createdAt ?? c?.created_at ?? new Date().toISOString(),
+        };
+        setUserPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId ? { ...p, comments: [...(p.comments || []), newComment] } : p
+          )
+        );
+        // keep selectedPost in sync if modal is open for this post
+        if (selectedPost && selectedPost.id === postId) {
+          setSelectedPost({ ...selectedPost, comments: [...(selectedPost.comments || []), newComment] });
+        }
+        setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
+      } else {
+        // optimistic comment in correct shape
+        const newComment = {
+          id: `c_${Date.now()}`,
+          text,
+          user: user.username,
+          userPhoto: user.avatar ?? undefined,
+          createdAt: new Date().toISOString(),
+        };
+        setUserPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId ? { ...p, comments: [...(p.comments || []), newComment] } : p
+          )
+        );
+        setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
+      }
+    } catch (err) {
+      console.error('Failed to add comment:', err);
+    }
+  };
+
+  // Open a post in the modal and ensure comments are loaded for it
+  const openPostModal = async (post: Post) => {
+    try {
+      const cRes = await api.getComments(post.id);
+      let mapped: any[] = post.comments || [];
+      if (cRes && cRes.success && Array.isArray(cRes.comments)) {
+        mapped = cRes.comments.map((c: any) => ({
+          id: c.id,
+          text: c.text,
+          user: (c.user && (c.user.username || c.user)) || c.user || 'Unknown',
+          userPhoto: c.userPhoto || c.user?.avatar_url || undefined,
+          createdAt: c.createdAt || c.created_at || new Date().toISOString(),
+        }));
+      }
+
+      const updated = { ...post, comments: mapped } as Post;
+      setUserPosts((prev) => prev.map((p) => (p.id === post.id ? updated : p)));
+      setSelectedPost(updated);
+    } catch (e) {
+      console.warn('Failed to load comments for post', post.id, e);
+      setSelectedPost(post);
+    }
+  };
+
   if (!user) {
     return <div>Please log in</div>;
   }
 
-  const hasCustomAvatar = user.avatar && user.avatar !== 'default';
+  const profileId = paramId || user.id;
+  const isOwnProfile = !paramId || paramId === user.id;
+  const displayUser = isOwnProfile ? user : (profileInfo ? {
+    id: profileInfo.id,
+    username: profileInfo.username,
+    email: profileInfo.email,
+    avatar: profileInfo.avatar_url || profileInfo.avatar || null
+  } : { id: profileId, username: 'User', email: '' });
+
+  const hasCustomAvatar = displayUser?.avatar && displayUser.avatar !== 'default';
 
   return (
     <div>
@@ -263,26 +422,61 @@ export default function Profile() {
             </div>
             
             <div className="profile-details">
-              <h2>{user.username}</h2>
-              <p>{user.email}</p>
+              <h2>{displayUser.username}</h2>
+              <p>{displayUser.email}</p>
+              {!isOwnProfile && profileInfo && (
+                <div className="profile-follow-stats">
+                  <button
+                    className={`follow-button ${profileInfo.isFollowing ? 'following' : ''}`}
+                    onClick={() => {
+                      if (profileInfo.isFollowing) {
+                        // unfollow: update UI and local state & backend
+                        setProfileInfo({ ...profileInfo, isFollowing: false, followerCount: (profileInfo.followerCount || 1) - 1 });
+                        try {
+                          unfollowUser(profileId);
+                        } catch (e) {
+                          console.warn('unfollow error', e);
+                        }
+                      } else {
+                        setProfileInfo({ ...profileInfo, isFollowing: true, followerCount: (profileInfo.followerCount || 0) + 1 });
+                        try {
+                          followUser(profileId);
+                        } catch (e) {
+                          console.warn('follow error', e);
+                        }
+                      }
+                    }}
+                  >
+                    {profileInfo.isFollowing ? 'Following' : 'Follow'}
+                  </button>
+                  <div className="follow-counts">
+                    <span>{profileInfo.followerCount || 0} followers</span>
+                    <span>{profileInfo.followingCount || 0} following</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleFileChange}
-            style={{ display: 'none' }}
-          />
+          {isOwnProfile && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+              />
 
-          <button onClick={handleChangePhotoClick} className="change-photo-btn">
-            Change profile photo
-          </button>
+              <button onClick={handleChangePhotoClick} className="change-photo-btn">
+                Change profile photo
+              </button>
 
-          <button onClick={handleLogout} className="logout-btn">
-            Logout
-          </button>
+              <button onClick={handleLogout} className="logout-btn">
+                Logout
+              </button>
+            </>
+          )}
         </div>
 
         {/* My Posts Section */}
@@ -292,13 +486,13 @@ export default function Profile() {
             <p className="no-posts-message">No posts yet. Create your first post!</p>
           ) : (
             <div className="profile-posts-container">
-              {userPosts
+                  {userPosts
                 .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                 .map((post) => (
                   <div 
                     key={post.id} 
-                    className="profile-post-card"
-                    onClick={() => handleEditClick(post)}
+                    className={`profile-post-card ${isOwnProfile ? 'own-post' : 'other-post'}`}
+                    onClick={() => { if (isOwnProfile) { handleEditClick(post); } else { openPostModal(post); } }}
                   >
                     <div className="profile-post-header">
                       <h3 className="profile-post-title">{post.title}</h3>
@@ -319,14 +513,28 @@ export default function Profile() {
                     
                     <div className="profile-post-footer">
                       <div className="profile-post-likes">
-                        <AiFillLike className="profile-like-icon" />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleLikeToggle(post); }}
+                          className={`profile-like-btn ${(post.likers && user && post.likers.includes(user.id)) ? 'liked' : ''}`}
+                          aria-label="Like"
+                        >
+                          <AiFillLike className="profile-like-icon" />
+                        </button>
                         <span>{post.likers?.length ?? post.likes ?? 0}</span>
                       </div>
-                      {post.comments && post.comments.length > 0 && (
-                        <div className="profile-post-comments">
-                          <span>{post.comments.length} comment{post.comments.length !== 1 ? 's' : ''}</span>
-                        </div>
-                      )}
+                      <div className="profile-post-comments">
+                        <span>{post.comments?.length ? `${post.comments.length} comment${post.comments.length !== 1 ? 's' : ''}` : '0 comments'}</span>
+                      </div>
+                    </div>
+                    <div className="profile-comment-input">
+                      <input
+                        type="text"
+                        placeholder="Add a comment..."
+                        value={commentInputs[post.id] || ''}
+                        onChange={(e) => { e.stopPropagation(); handleCommentChange(post.id, e.target.value); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <button onClick={(e) => { e.stopPropagation(); handleAddComment(post.id); }}>Post</button>
                     </div>
                   </div>
                 ))}
@@ -334,6 +542,64 @@ export default function Profile() {
           )}
         </div>
       </div>
+
+      {/* Selected post modal for viewing comments/likes */}
+      {selectedPost && (
+        <div className="post-modal-overlay" onClick={() => setSelectedPost(null)}>
+          <div className="post-modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setSelectedPost(null)}>×</button>
+            <div className="modal-header">
+              <h2 className="modal-title">{selectedPost.title}</h2>
+              <p className="modal-meta">by: {selectedPost.user}, posted: {getTimeAgo(selectedPost.createdAt)}</p>
+            </div>
+            {getMediaElement(selectedPost) && (
+              <div className="modal-media">{getMediaElement(selectedPost)}</div>
+            )}
+            <div className="modal-body">
+              <p className="modal-content">{selectedPost.content}</p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className={`like-button ${selectedPost.likers && user && selectedPost.likers.includes(user.id) ? 'liked' : ''}`}
+                onClick={(e) => { e.stopPropagation(); handleLikeToggle(selectedPost); }}
+              >
+                <AiFillLike className="profile-like-icon" />
+                <span>{selectedPost.likers?.length ?? selectedPost.likes ?? 0}</span>
+              </button>
+            </div>
+            <div className="modal-comments-section">
+              {selectedPost.comments && selectedPost.comments.length > 0 && (
+                <div className="comments-list">
+                  {selectedPost.comments.map((c) => (
+                    <div key={c.id} className="comment-item">
+                      <div className="comment-avatar">
+                        {c.userPhoto ? <img src={c.userPhoto} alt={c.user} className="comment-photo" /> : <GiEgyptianProfile size={24} className="comment-icon" />}
+                      </div>
+                      <div className="comment-content">
+                        <div className="comment-header">
+                          <span className="comment-username">{c.user}</span>
+                          <span className="comment-time">{getTimeAgo(c.createdAt)}</span>
+                        </div>
+                        <p className="comment-text">{c.text}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <form className="comment-form" onSubmit={(e) => { e.preventDefault(); handleAddComment(selectedPost.id); }}>
+                <input
+                  ref={commentInputRef}
+                  type="text"
+                  placeholder="Add a comment..."
+                  value={commentInputs[selectedPost.id] || ''}
+                  onChange={(e) => handleCommentChange(selectedPost.id, e.target.value)}
+                />
+                <button type="submit">Post</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Post Modal */}
       {editingPost && !showDeleteFromEditConfirm && (
