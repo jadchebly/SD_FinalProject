@@ -5,9 +5,8 @@ import type { Post, Comment } from "../../types/Post";
 import { AiFillLike } from "react-icons/ai";
 import { GiEgyptianProfile } from "react-icons/gi";
 import { useAuth } from "../../contexts/AuthContext";
-import { FaTrash, FaComment } from "react-icons/fa";
+import { FaEdit, FaComment } from "react-icons/fa";
 import api from "../../services/api";
-import { FiEdit2 } from "react-icons/fi";
 import SuggestedUsersModal from "../SuggestedUsersModal";
 
 export default function Dashboard() {
@@ -20,8 +19,7 @@ export default function Dashboard() {
   const [postToDelete, setPostToDelete] = useState<Post | null>(null);
   const [showDeletePostConfirm, setShowDeletePostConfirm] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
-  const [editFormData, setEditFormData] = useState({ title: "", content: "", videoLink: "" });
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [editFormData, setEditFormData] = useState({ title: "", content: "" });
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
   const [showSuggestedUsers, setShowSuggestedUsers] = useState(false);
 
@@ -336,6 +334,64 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteSuccessOk = () => {
+    setShowDeleteSuccess(false);
+  };
+
+  const handleEditClick = (post: Post) => {
+    setEditingPost(post);
+    setEditFormData({
+      title: post.title,
+      content: post.content,
+    });
+  };
+
+  const handleEditCancel = () => {
+    setEditingPost(null);
+    setEditFormData({ title: "", content: "" });
+  };
+
+  const handleSaveChanges = async () => {
+    if (!editingPost) return;
+
+    const trimmedTitle = editFormData.title.trim();
+    const trimmedContent = editFormData.content.trim();
+
+    if (!trimmedTitle || !trimmedContent) {
+      alert("Title and content cannot be empty");
+      return;
+    }
+
+    try {
+      const result = await api.updatePost(editingPost.id, trimmedTitle, trimmedContent);
+      
+      if (result.success) {
+        // Update the post in local state
+        setPosts((prevPosts) =>
+          prevPosts.map((post) =>
+            post.id === editingPost.id
+              ? { ...post, title: trimmedTitle, content: trimmedContent }
+              : post
+          )
+        );
+
+        // Update selectedPost if it's the same post
+        if (selectedPost && selectedPost.id === editingPost.id) {
+          setSelectedPost({
+            ...selectedPost,
+            title: trimmedTitle,
+            content: trimmedContent,
+          });
+        }
+
+        // Close edit modal
+        handleEditCancel();
+      }
+    } catch (error: any) {
+      console.error("Error updating post:", error);
+      alert(`Failed to update post: ${error?.message || "Unknown error"}`);
+    }
+  };
 
   const getMediaElement = (post: Post, isModal: boolean = false) => {
     // Priority: photo capture > video capture > uploaded file > YouTube link
@@ -483,15 +539,14 @@ export default function Dashboard() {
                     {user && post.user === user.username && (
                       <div className="post-actions-right">
                         <button
-                          className="delete-button"
+                          className="edit-button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setPostToDelete(post);
-                            setShowDeletePostConfirm(true);
+                            handleEditClick(post);
                           }}
-                          aria-label="Delete post"
+                          aria-label="Edit post"
                         >
-                          <FaTrash className="delete-icon" />
+                          <FaEdit className="edit-icon" />
                         </button>
                       </div>
                     )}
@@ -663,6 +718,61 @@ export default function Dashboard() {
                   onClick={handleDeleteSuccessOk}
                 >
                   OK
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Post Modal */}
+        {editingPost && (
+          <div 
+            className="post-modal-overlay"
+            onClick={handleEditCancel}
+          >
+            <div 
+              className="edit-post-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="edit-post-title">Edit Post</h3>
+              <div className="edit-post-form">
+                <div className="edit-form-group">
+                  <label htmlFor="edit-title">Title</label>
+                  <input
+                    id="edit-title"
+                    type="text"
+                    className="edit-form-input"
+                    value={editFormData.title}
+                    onChange={(e) => setEditFormData({ ...editFormData, title: e.target.value })}
+                    placeholder="Enter post title"
+                  />
+                </div>
+                <div className="edit-form-group">
+                  <label htmlFor="edit-content">Content</label>
+                  <textarea
+                    id="edit-content"
+                    className="edit-form-textarea"
+                    value={editFormData.content}
+                    onChange={(e) => setEditFormData({ ...editFormData, content: e.target.value })}
+                    placeholder="Enter post content"
+                    rows={6}
+                  />
+                </div>
+              </div>
+              <div className="edit-post-actions">
+                <button 
+                  type="button" 
+                  className="edit-cancel-btn" 
+                  onClick={handleEditCancel}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button" 
+                  className="edit-save-btn" 
+                  onClick={handleSaveChanges}
+                >
+                  Save Changes
                 </button>
               </div>
             </div>
