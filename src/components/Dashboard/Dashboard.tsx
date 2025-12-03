@@ -1,6 +1,6 @@
 import Navbar from "./Navbar/Navbar";
 import "./Dashboard.css";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Post, Comment } from "../../types/Post";
 import { AiFillLike } from "react-icons/ai";
 import { GiEgyptianProfile } from "react-icons/gi";
@@ -22,6 +22,8 @@ export default function Dashboard() {
   const [editFormData, setEditFormData] = useState({ title: "", content: "" });
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
   const [showSuggestedUsers, setShowSuggestedUsers] = useState(false);
+  const [shouldFocusComment, setShouldFocusComment] = useState(false);
+  const commentInputRef = useRef<HTMLInputElement>(null);
 
   // Load posts from API feed
   useEffect(() => {
@@ -440,6 +442,7 @@ export default function Dashboard() {
           handleDeletePostConfirm(false);
         } else if (selectedPost) {
           setSelectedPost(null);
+          setShouldFocusComment(false);
         }
       }
     };
@@ -456,6 +459,17 @@ export default function Dashboard() {
       }
     };
   }, [selectedPost, showDeletePostConfirm]);
+
+  // Focus comment input when modal opens via comment button
+  useEffect(() => {
+    if (selectedPost && shouldFocusComment && commentInputRef.current) {
+      // Small delay to ensure modal is fully rendered
+      setTimeout(() => {
+        commentInputRef.current?.focus();
+        setShouldFocusComment(false);
+      }, 100);
+    }
+  }, [selectedPost, shouldFocusComment]);
 
   return (
     <div className="dashboard-container">
@@ -528,7 +542,8 @@ export default function Dashboard() {
                         className="comment-button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          // TODO: Implement comments
+                          setShouldFocusComment(true);
+                          setSelectedPost(post);
                         }}
                         aria-label="Comment on post"
                         title="Comment"
@@ -651,6 +666,7 @@ export default function Dashboard() {
                   onSubmit={(e) => handleCommentSubmit(e, selectedPost.id)}
                 >
                   <input
+                    ref={commentInputRef}
                     type="text"
                     placeholder="Add a comment..."
                     value={commentInputs[selectedPost.id] || ""}
