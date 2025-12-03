@@ -14,6 +14,9 @@ interface AuthContextType {
   signup: (username: string, email: string, password: string) => Promise<boolean>;
   logout: () => void;
   updateAvatar: (avatar: string) => void;
+  followUser: (userId: string) => void;
+  unfollowUser: (userId: string) => void;
+  getFollowingList: () => string[];
   isAuthenticated: boolean;
   isLoading: boolean;
 }
@@ -89,6 +92,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    // Clear session storage flags for suggested users modal
+    // This ensures the modal will show again on next sign in
+    if (user) {
+      sessionStorage.removeItem(`suggestedUsersShown_${user.id}`);
+    }
     setUser(null);
     localStorage.removeItem('user');
   };
@@ -108,6 +116,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('users', JSON.stringify(updatedUsers));
   };
 
+  const followUser = (userId: string) => {
+    if (!user) return;
+    
+    const following = JSON.parse(localStorage.getItem('following') || '{}');
+    if (!following[user.id]) {
+      following[user.id] = [];
+    }
+    
+    if (!following[user.id].includes(userId)) {
+      following[user.id].push(userId);
+      localStorage.setItem('following', JSON.stringify(following));
+    }
+  };
+
+  const unfollowUser = (userId: string) => {
+    if (!user) return;
+    
+    const following = JSON.parse(localStorage.getItem('following') || '{}');
+    if (following[user.id]) {
+      following[user.id] = following[user.id].filter((id: string) => id !== userId);
+      localStorage.setItem('following', JSON.stringify(following));
+    }
+  };
+
+  const getFollowingList = (): string[] => {
+    if (!user) return [];
+    
+    const following = JSON.parse(localStorage.getItem('following') || '{}');
+    return following[user.id] || [];
+  };
+
   return (
     <AuthContext.Provider value={{ 
       user, 
@@ -115,6 +154,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signup, 
       logout, 
       updateAvatar,
+      followUser,
+      unfollowUser,
+      getFollowingList,
       isAuthenticated: !!user,
       isLoading
     }}>
