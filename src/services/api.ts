@@ -77,6 +77,32 @@ class ApiService {
     return response.json();
   }
 
+  async updatePost(postId: string, title: string, content: string): Promise<any> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    
+    const response = await fetch(`${API_URL}/api/posts/${postId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.id && { 'x-user-id': user.id }),
+      },
+      body: JSON.stringify({ title, content }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = 'Failed to update post';
+      try {
+        const error = await response.json();
+        errorMessage = error.error || error.message || errorMessage;
+      } catch (e) {
+        errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  }
+
   async deletePost(postId: string): Promise<any> {
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     

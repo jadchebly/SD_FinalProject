@@ -669,6 +669,84 @@ app.get('/api/users/search/:query', async (req, res) => {
   }
 });
 
+// Get posts endpoint (supports filtering by user_id query parameter)
+app.get('/api/posts', async (req, res) => {
+  try {
+    const userId = req.query.user_id as string;
+    const currentUserId = req.headers['x-user-id'] as string;
+
+    let query = supabase
+      .from('posts')
+      .select(`
+        *,
+        users:user_id (
+          id,
+          username,
+          avatar_url
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    // If user_id is provided, filter by that user
+    if (userId) {
+      query = query.eq('user_id', userId);
+    }
+
+    const { data: posts, error: postsError } = await query;
+
+    if (postsError) {
+      throw postsError;
+    }
+
+    if (!posts || posts.length === 0) {
+      return res.json({
+        success: true,
+        posts: [],
+      });
+    }
+
+    // Get likes for each post
+    const postIds = posts.map(p => p.id);
+    const { data: likes } = await supabase
+      .from('likes')
+      .select('user_id, post_id')
+      .in('post_id', postIds);
+
+    // Get comments count for each post
+    const { data: comments } = await supabase
+      .from('comments')
+      .select('post_id')
+      .in('post_id', postIds);
+
+    // Combine data
+    const postsWithDetails = posts.map(post => {
+      const postLikes = likes?.filter(l => l.post_id === post.id) || [];
+      const postComments = comments?.filter(c => c.post_id === post.id) || [];
+      const hasLiked = currentUserId ? likes?.some(l => l.post_id === post.id && l.user_id === currentUserId) || false : false;
+
+      return {
+        ...post,
+        user: post.users?.username || 'Unknown',
+        likes: postLikes.length,
+        likers: postLikes.map(l => l.user_id),
+        commentsCount: postComments.length,
+        hasLiked,
+      };
+    });
+
+    res.json({
+      success: true,
+      posts: postsWithDetails,
+    });
+  } catch (error: any) {
+    console.error('Get posts error:', error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to get posts',
+    });
+  }
+});
+
 app.post('/api/posts', async (req, res) => {
   try {
     const { title, content, type, image_url, video_url, user_id, username } = req.body;
@@ -813,6 +891,102 @@ app.post('/api/posts', async (req, res) => {
       success: false,
       error: errorMessage,
       details: errorDetails,
+    });
+  }
+});
+
+// Update post endpoint
+app.put('/api/posts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, content } = req.body;
+    const user_id = req.headers['x-user-id'] as string;
+
+    console.log('✏️ PUT /api/posts/:id called');
+    console.log('✏️ Post ID:', id);
+    console.log('✏️ User ID from header:', user_id);
+    console.log('✏️ Title:', title);
+    console.log('✏️ Content:', content);
+
+    if (!user_id) {
+      console.error('❌ No user ID provided');
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    if (!title || !content) {
+      return res.status(400).json({ error: 'Title and content are required' });
+    }
+
+    // Trim and validate title and content
+    const trimmedTitle = title.trim();
+    const trimmedContent = content.trim();
+
+    if (trimmedTitle.length === 0) {
+      return res.status(400).json({ error: 'Title cannot be empty' });
+    }
+
+    if (trimmedContent.length === 0) {
+      return res.status(400).json({ error: 'Content cannot be empty' });
+    }
+
+    const { data: post, error: fetchError } = await supabaseAdmin
+      .from('posts')
+      .select('id, user_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError) {
+      console.error('Error fetching post:', fetchError);
+      return res.status(404).json({ error: 'Post not found', details: fetchError.message });
+    }
+
+    if (!post) {
+      console.error('Post not found in database');
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    // Check if user owns the post
+    if (post.user_id !== user_id) {
+      return res.status(403).json({ error: 'You can only edit your own posts' });
+    }
+
+    // Update the post (using admin client to bypass RLS)
+    const { data: updatedPosts, error: updateError } = await supabaseAdmin
+      .from('posts')
+      .update({
+        title: trimmedTitle,
+        content: trimmedContent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select();
+
+    if (updateError) {
+     throw updateError;
+    }
+
+    if (!updatedPosts || updatedPosts.length === 0) {
+      return res.status(404).json({ error: 'Post not found or could not be updated' });
+    }
+
+    const updatedPost = updatedPosts[0];
+    console.log('✅ Post updated successfully:', { id: updatedPost.id, title: updatedPost.title });
+
+    res.json({
+      success: true,
+      post: updatedPost,
+    });
+  } catch (error: any) {
+    console.error('Update post error:', error);
+    console.error('Error details:', {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+    });
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to update post',
     });
   }
 });
