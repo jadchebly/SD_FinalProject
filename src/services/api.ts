@@ -387,6 +387,61 @@ class ApiService {
     return response.json();
   }
 
+  async updateUserAvatar(userId: string, avatarUrl: string): Promise<any> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    
+    const response = await fetch(`${API_URL}/api/users/${userId}/avatar`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.id && { 'x-user-id': user.id }),
+      },
+      body: JSON.stringify({ avatar_url: avatarUrl }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to update avatar');
+    }
+
+    return response.json();
+  }
+
+  async getFollowers(userId: string): Promise<any> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    
+    const response = await fetch(`${API_URL}/api/users/${userId}/followers`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.id && { 'x-user-id': user.id }),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get followers');
+    }
+
+    return response.json();
+  }
+
+  async getFollowing(userId: string): Promise<any> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    
+    const response = await fetch(`${API_URL}/api/users/${userId}/following`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.id && { 'x-user-id': user.id }),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get following');
+    }
+
+    return response.json();
+  }
+
   async likePost(postId: string): Promise<any> {
     const headers = await this.getAuthHeaders();
     
@@ -470,6 +525,24 @@ class ApiService {
 
     if (!response.ok) {
       throw new Error('Failed to search users');
+    }
+
+    return response.json();
+  }
+
+  async getSuggestedUsers(): Promise<any> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    
+    const response = await fetch(`${API_URL}/api/users/suggested`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.id && { 'x-user-id': user.id }),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get suggested users');
     }
 
     return response.json();

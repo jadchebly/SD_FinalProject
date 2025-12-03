@@ -155,12 +155,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFollowingList([]);
   };
 
-  const updateAvatar = (avatar: string) => {
+  const updateAvatar = async (avatar: string) => {
     if (!user) return;
     
-    const updatedUser = { ...user, avatar };
-    setUser(updatedUser);
-    // TODO: Consider calling backend to persist avatar change (if you add an endpoint)
+    try {
+      console.log('Updating avatar for user:', user.id);
+      // Update avatar in Supabase
+      const response = await api.updateUserAvatar(user.id, avatar);
+      console.log('Avatar update response:', response);
+      
+      if (response && response.success && response.user) {
+        const updatedUser = {
+          id: response.user.id,
+          username: response.user.username,
+          email: response.user.email,
+          avatar: response.user.avatar || null,
+        };
+        console.log('Avatar updated successfully, new avatar:', updatedUser.avatar ? 'present' : 'null');
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      } else {
+        console.warn('Avatar update response missing success or user data');
+        // Fallback: update local state even if API call fails
+        const updatedUser = { ...user, avatar };
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+    } catch (error) {
+      console.error('Failed to update avatar in Supabase:', error);
+      // Fallback: update local state even if API call fails
+      const updatedUser = { ...user, avatar };
+      setUser(updatedUser);
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+    }
   };
 
   const followUser = async (userId: string) => {

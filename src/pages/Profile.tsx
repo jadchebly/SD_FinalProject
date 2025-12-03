@@ -23,6 +23,11 @@ export default function Profile() {
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
+  const [showFollowersModal, setShowFollowersModal] = useState(false);
+  const [showFollowingModal, setShowFollowingModal] = useState(false);
+  const [followersList, setFollowersList] = useState<any[]>([]);
+  const [followingList, setFollowingList] = useState<any[]>([]);
+  const [modalFollowStatus, setModalFollowStatus] = useState<Record<string, boolean>>({});
 
   const handleLogout = () => {
     logout();
@@ -75,7 +80,7 @@ export default function Profile() {
       const dataUrl = reader.result as string;
       // Compress the image
       const compressedImage = await compressImage(dataUrl, 400, 0.8);
-      updateAvatar(compressedImage);
+      await updateAvatar(compressedImage);
     };
     reader.readAsDataURL(file);
   };
@@ -315,22 +320,33 @@ export default function Profile() {
     }
   };
 
-  const handleCommentChange = (postId: string, value: string) => {
+  const handleCommentInputChange = (postId: string, value: string) => {
     setCommentInputs((prev) => ({ ...prev, [postId]: value }));
   };
 
-  const handleAddComment = async (postId: string) => {
-    if (!user) return;
-    const text = (commentInputs[postId] || '').trim();
-    if (!text) return;
+  const handleCommentSubmit = async (e: React.FormEvent, postId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const commentText = commentInputs[postId]?.trim();
+    if (!commentText) return;
+
+    if (!user) {
+      console.error("User not authenticated");
+      return;
+    }
+
+    // Clear input immediately for snappy UX
+    setCommentInputs({ ...commentInputs, [postId]: "" });
+
     try {
-      const res = await api.addComment(postId, text);
+      const res = await api.addComment(postId, commentText);
       if (res && res.success) {
         // Normalize backend comment to Comment shape
         const c = res.comment;
         const newComment = {
           id: c?.id ?? `c_${Date.now()}`,
-          text,
+          text: commentText,
           user: typeof c?.user === 'string' ? c.user : (c?.user?.username ?? user.username),
           userPhoto: c?.userPhoto ?? c?.user?.avatar_url ?? undefined,
           createdAt: c?.createdAt ?? c?.created_at ?? new Date().toISOString(),
@@ -344,12 +360,11 @@ export default function Profile() {
         if (selectedPost && selectedPost.id === postId) {
           setSelectedPost({ ...selectedPost, comments: [...(selectedPost.comments || []), newComment] });
         }
-        setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
       } else {
         // optimistic comment in correct shape
         const newComment = {
           id: `c_${Date.now()}`,
-          text,
+          text: commentText,
           user: user.username,
           userPhoto: user.avatar ?? undefined,
           createdAt: new Date().toISOString(),
@@ -359,7 +374,9 @@ export default function Profile() {
             p.id === postId ? { ...p, comments: [...(p.comments || []), newComment] } : p
           )
         );
-        setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
+        if (selectedPost && selectedPost.id === postId) {
+          setSelectedPost({ ...selectedPost, comments: [...(selectedPost.comments || []), newComment] });
+        }
       }
     } catch (err) {
       console.error('Failed to add comment:', err);
@@ -390,6 +407,95 @@ export default function Profile() {
     }
   };
 
+  const handleOpenFollowersModal = async () => {
+    if (!user || !profileInfo) return;
+    try {
+      const res = await api.getFollowers(user.id);
+      if (res && res.success) {
+        const users = res.users || [];
+        setFollowersList(users);
+        const statusMap: Record<string, boolean> = {};
+        users.forEach((u: any) => {
+          statusMap[u.id] = u.isFollowing || false;
+        });
+        setModalFollowStatus(statusMap);
+        setShowFollowersModal(true);
+      }
+    } catch (err) {
+      console.error('Failed to load followers:', err);
+    }
+  };
+
+  const handleOpenFollowingModal = async () => {
+    if (!user || !profileInfo) return;
+    try {
+      const res = await api.getFollowing(user.id);
+      if (res && res.success) {
+        const users = res.users || [];
+        setFollowingList(users);
+        const statusMap: Record<string, boolean> = {};
+        users.forEach((u: any) => {
+          statusMap[u.id] = u.isFollowing || false;
+        });
+        setModalFollowStatus(statusMap);
+        setShowFollowingModal(true);
+      }
+    } catch (err) {
+      console.error('Failed to load following:', err);
+    }
+  };
+
+  const handleCloseFollowersModal = () => {
+    setShowFollowersModal(false);
+    // Reload profile info to update counts
+    if (user) {
+      const loadProfile = async () => {
+        try {
+          const res = await api.getUserProfile(user.id);
+          if (res && res.success) {
+            setProfileInfo(res.user || res.profile || null);
+          }
+        } catch (err) {
+          console.error('Failed to reload profile info:', err);
+        }
+      };
+      loadProfile();
+    }
+  };
+
+  const handleCloseFollowingModal = () => {
+    setShowFollowingModal(false);
+    // Reload profile info to update counts
+    if (user) {
+      const loadProfile = async () => {
+        try {
+          const res = await api.getUserProfile(user.id);
+          if (res && res.success) {
+            setProfileInfo(res.user || res.profile || null);
+          }
+        } catch (err) {
+          console.error('Failed to reload profile info:', err);
+        }
+      };
+      loadProfile();
+    }
+  };
+
+  const handleModalFollowToggle = async (userId: string) => {
+    const isFollowing = modalFollowStatus[userId] || false;
+    try {
+      if (isFollowing) {
+        await api.unfollowUser(userId);
+        setModalFollowStatus((prev) => ({ ...prev, [userId]: false }));
+      } else {
+        await api.followUser(userId);
+        setModalFollowStatus((prev) => ({ ...prev, [userId]: true }));
+      }
+    } catch (err) {
+      console.error('Failed to toggle follow:', err);
+    }
+  };
+
   if (!user) {
     return <div>Please log in</div>;
   }
@@ -415,7 +521,7 @@ export default function Profile() {
           <div className="profile-info">
             <div className="profile-avatar">
               {hasCustomAvatar ? (
-                <img src={user.avatar} alt="Profile" className="profile-avatar-img" />
+                <img src={displayUser.avatar} alt="Profile" className="profile-avatar-img" />
               ) : (
                 <GiEgyptianProfile size={64} />
               )}
@@ -424,34 +530,54 @@ export default function Profile() {
             <div className="profile-details">
               <h2>{displayUser.username}</h2>
               <p>{displayUser.email}</p>
-              {!isOwnProfile && profileInfo && (
+              {profileInfo && (
                 <div className="profile-follow-stats">
-                  <button
-                    className={`follow-button ${profileInfo.isFollowing ? 'following' : ''}`}
-                    onClick={() => {
-                      if (profileInfo.isFollowing) {
-                        // unfollow: update UI and local state & backend
-                        setProfileInfo({ ...profileInfo, isFollowing: false, followerCount: (profileInfo.followerCount || 1) - 1 });
-                        try {
-                          unfollowUser(profileId);
-                        } catch (e) {
-                          console.warn('unfollow error', e);
+                  {!isOwnProfile && (
+                    <button
+                      className={`follow-button ${profileInfo.isFollowing ? 'following' : ''}`}
+                      onClick={() => {
+                        if (profileInfo.isFollowing) {
+                          // unfollow: update UI and local state & backend
+                          setProfileInfo({ ...profileInfo, isFollowing: false, followerCount: (profileInfo.followerCount || 1) - 1 });
+                          try {
+                            unfollowUser(profileId);
+                          } catch (e) {
+                            console.warn('unfollow error', e);
+                          }
+                        } else {
+                          setProfileInfo({ ...profileInfo, isFollowing: true, followerCount: (profileInfo.followerCount || 0) + 1 });
+                          try {
+                            followUser(profileId);
+                          } catch (e) {
+                            console.warn('follow error', e);
+                          }
                         }
-                      } else {
-                        setProfileInfo({ ...profileInfo, isFollowing: true, followerCount: (profileInfo.followerCount || 0) + 1 });
-                        try {
-                          followUser(profileId);
-                        } catch (e) {
-                          console.warn('follow error', e);
-                        }
-                      }
-                    }}
-                  >
-                    {profileInfo.isFollowing ? 'Following' : 'Follow'}
-                  </button>
+                      }}
+                    >
+                      {profileInfo.isFollowing ? 'Following' : 'Follow'}
+                    </button>
+                  )}
                   <div className="follow-counts">
-                    <span>{profileInfo.followerCount || 0} followers</span>
-                    <span>{profileInfo.followingCount || 0} following</span>
+                    <span 
+                      onClick={() => {
+                        if (isOwnProfile && (profileInfo.followerCount || 0) > 0) {
+                          handleOpenFollowersModal();
+                        }
+                      }}
+                      style={isOwnProfile && (profileInfo.followerCount || 0) > 0 ? { cursor: 'pointer' } : {}}
+                    >
+                      {profileInfo.followerCount || 0} followers
+                    </span>
+                    <span 
+                      onClick={() => {
+                        if (isOwnProfile && (profileInfo.followingCount || 0) > 0) {
+                          handleOpenFollowingModal();
+                        }
+                      }}
+                      style={isOwnProfile && (profileInfo.followingCount || 0) > 0 ? { cursor: 'pointer' } : {}}
+                    >
+                      {profileInfo.followingCount || 0} following
+                    </span>
                   </div>
                 </div>
               )}
@@ -481,9 +607,9 @@ export default function Profile() {
 
         {/* My Posts Section */}
         <div className="my-posts-section">
-          <h2 className="my-posts-title">My Posts</h2>
+          <h2 className="my-posts-title">{isOwnProfile ? 'My Posts' : `${displayUser.username}'s Posts`}</h2>
           {userPosts.length === 0 ? (
-            <p className="no-posts-message">No posts yet. Create your first post!</p>
+            <p className="no-posts-message">{isOwnProfile ? 'No posts yet. Create your first post!' : `${displayUser.username} hasn't posted anything yet.`}</p>
           ) : (
             <div className="profile-posts-container">
                   {userPosts
@@ -523,19 +649,17 @@ export default function Profile() {
                         <span>{post.likers?.length ?? post.likes ?? 0}</span>
                       </div>
                       <div className="profile-post-comments">
-                        <span>{post.comments?.length ? `${post.comments.length} comment${post.comments.length !== 1 ? 's' : ''}` : '0 comments'}</span>
+                        <span 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            openPostModal(post); 
+                          }}
+                        >
+                          {post.comments?.length ? `${post.comments.length} comment${post.comments.length !== 1 ? 's' : ''}` : '0 comments'}
+                        </span>
                       </div>
                     </div>
-                    <div className="profile-comment-input">
-                      <input
-                        type="text"
-                        placeholder="Add a comment..."
-                        value={commentInputs[post.id] || ''}
-                        onChange={(e) => { e.stopPropagation(); handleCommentChange(post.id, e.target.value); }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                      <button onClick={(e) => { e.stopPropagation(); handleAddComment(post.id); }}>Post</button>
-                    </div>
+                    
                   </div>
                 ))}
             </div>
@@ -586,15 +710,21 @@ export default function Profile() {
                   ))}
                 </div>
               )}
-              <form className="comment-form" onSubmit={(e) => { e.preventDefault(); handleAddComment(selectedPost.id); }}>
+              <form 
+                className="comment-form"
+                onSubmit={(e) => handleCommentSubmit(e, selectedPost.id)}
+              >
                 <input
                   ref={commentInputRef}
                   type="text"
                   placeholder="Add a comment..."
-                  value={commentInputs[selectedPost.id] || ''}
-                  onChange={(e) => handleCommentChange(selectedPost.id, e.target.value)}
+                  value={commentInputs[selectedPost.id] || ""}
+                  onChange={(e) => handleCommentInputChange(selectedPost.id, e.target.value)}
+                  className="comment-input"
                 />
-                <button type="submit">Post</button>
+                <button type="submit" className="comment-submit-btn">
+                  Post
+                </button>
               </form>
             </div>
           </div>
@@ -694,7 +824,103 @@ export default function Profile() {
           </div>
         </div>
       )}
+
+      {/* Followers Modal */}
+      {showFollowersModal && (
+        <div className="post-modal-overlay" onClick={handleCloseFollowersModal}>
+          <div className="post-modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={handleCloseFollowersModal}>×</button>
+            <h2 className="modal-title" style={{ marginBottom: '20px' }}>Followers</h2>
+            <div className="modal-comments-section" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+              {followersList.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(0,0,0,0.6)' }}>
+                  No followers yet
+                </div>
+              ) : (
+                followersList.map((follower) => {
+                  const hasCustomAvatar = follower.avatar_url && follower.avatar_url !== 'default';
+                  const isFollowing = modalFollowStatus[follower.id] || false;
+                  return (
+                    <div key={follower.id} className="people-search-row" style={{ marginBottom: '12px' }}>
+                      <div className="people-search-left" onClick={() => navigate(`/profile/${follower.id}`)}>
+                        {hasCustomAvatar ? (
+                          <img src={follower.avatar_url} alt={follower.username} className="people-search-avatar" />
+                        ) : (
+                          <GiEgyptianProfile size={20} />
+                        )}
+                        <div className="people-search-info">
+                          <div className="people-search-name">{follower.username}</div>
+                          <div className="people-search-email">{follower.email}</div>
+                        </div>
+                      </div>
+                      <div className="people-search-action">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleModalFollowToggle(follower.id);
+                          }}
+                          className={`search-follow-btn ${isFollowing ? 'following' : ''}`}
+                        >
+                          {isFollowing ? 'Following' : 'Follow'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Following Modal */}
+      {showFollowingModal && (
+        <div className="post-modal-overlay" onClick={handleCloseFollowingModal}>
+          <div className="post-modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal-title" style={{ marginBottom: '20px', marginTop: '20px' }}>Following</h2>
+            <div className="modal-comments-section" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+              {followingList.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'rgba(0,0,0,0.6)' }}>
+                  Not following anyone yet
+                </div>
+              ) : (
+                followingList.map((followingUser) => {
+                  const hasCustomAvatar = followingUser.avatar_url && followingUser.avatar_url !== 'default';
+                  const isFollowing = modalFollowStatus[followingUser.id] || false;
+                  return (
+                    <div key={followingUser.id} className="people-search-row" style={{ marginBottom: '12px' }}>
+                      <div className="people-search-left" onClick={() => navigate(`/profile/${followingUser.id}`)}>
+                        {hasCustomAvatar ? (
+                          <img src={followingUser.avatar_url} alt={followingUser.username} className="people-search-avatar" />
+                        ) : (
+                          <GiEgyptianProfile size={20} />
+                        )}
+                        <div className="people-search-info">
+                          <div className="people-search-name">{followingUser.username}</div>
+                          <div className="people-search-email">{followingUser.email}</div>
+                        </div>
+                      </div>
+                      <div className="people-search-action">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleModalFollowToggle(followingUser.id);
+                          }}
+                          className={`search-follow-btn ${isFollowing ? 'following' : ''}`}
+                        >
+                          {isFollowing ? 'Following' : 'Follow'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 
