@@ -46,6 +46,22 @@ CREATE TABLE IF NOT EXISTS likes (
   PRIMARY KEY (user_id, post_id)
 );
 
+-- Ensure CASCADE is set (in case table already exists)
+DO $$
+BEGIN
+  -- Check if foreign key exists and update it
+  IF EXISTS (
+    SELECT 1 FROM information_schema.table_constraints 
+    WHERE constraint_name = 'likes_post_id_fkey'
+  ) THEN
+    ALTER TABLE likes 
+    DROP CONSTRAINT IF EXISTS likes_post_id_fkey;
+    ALTER TABLE likes 
+    ADD CONSTRAINT likes_post_id_fkey 
+    FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
 -- Create index for faster queries
 CREATE INDEX IF NOT EXISTS idx_likes_post ON likes(post_id);
 CREATE INDEX IF NOT EXISTS idx_likes_user ON likes(user_id);

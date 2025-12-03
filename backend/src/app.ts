@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
-import { supabase } from './config/database';
+import { supabase, supabaseAdmin } from './config/database';
 import { uploadImageToSupabase, deleteImageFromSupabase } from './services/uploadService';
 
 dotenv.config();
@@ -823,26 +823,52 @@ app.delete('/api/posts/:id', async (req, res) => {
     const { id } = req.params;
     const user_id = req.headers['x-user-id'] as string;
 
+    console.log('🗑️ DELETE /api/posts/:id called');
+    console.log('🗑️ Post ID:', id);
+    console.log('🗑️ User ID from header:', user_id);
+    console.log('🗑️ All headers:', JSON.stringify(req.headers, null, 2));
+
     if (!user_id) {
+      console.error('❌ No user ID provided');
       return res.status(400).json({ error: 'User ID is required' });
     }
 
-    console.log('Deleting post:', id);
+    console.log('🗑️ Attempting to delete post:', id);
+    console.log('🗑️ Using admin client (bypasses RLS):', !!supabaseAdmin);
+    console.log('🗑️ Service role key present:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-    // First, get the post to check ownership and get image URL
-    const { data: post, error: fetchError } = await supabase
+    // First, get the post to check ownership and get image URL (using admin client to bypass RLS)
+    console.log('🗑️ Fetching post from database using admin client...');
+    const { data: post, error: fetchError } = await supabaseAdmin
       .from('posts')
-      .select('id, user_id, image_url')
+      .select('id, user_id, image_url, title')
       .eq('id', id)
       .single();
 
-    if (fetchError || !post) {
+    if (fetchError) {
+      console.error('❌ Error fetching post:', fetchError);
+      console.error('❌ Error code:', fetchError.code);
+      console.error('❌ Error message:', fetchError.message);
+      return res.status(404).json({ error: 'Post not found', details: fetchError.message });
+    }
+
+    if (!post) {
+      console.error('❌ Post not found in database');
       return res.status(404).json({ error: 'Post not found' });
     }
 
+    console.log('✅ Post found:', { id: post.id, user_id: post.user_id, title: post.title });
+    console.log('🗑️ Comparing user_id:', { post_user_id: post.user_id, request_user_id: user_id, match: post.user_id === user_id });
+
     // Check if user owns the post
     if (post.user_id !== user_id) {
-      return res.status(403).json({ error: 'You can only delete your own posts' });
+      console.error('❌ User does not own this post');
+      console.error('❌ Post user_id:', post.user_id);
+      console.error('❌ Request user_id:', user_id);
+      return res.status(403).json({ 
+        error: 'You can only delete your own posts',
+        details: `Post belongs to ${post.user_id}, but you are ${user_id}`
+      });
     }
 
     // Delete associated image from storage if it exists
@@ -859,22 +885,69 @@ app.delete('/api/posts/:id', async (req, res) => {
       }
     }
 
-    // Delete the post from database
-    const { error: deleteError } = await supabase
+    // Delete the post from database using admin client to bypass RLS
+    // This will automatically cascade delete:
+    // - All comments on this post (via ON DELETE CASCADE)
+    // - All likes on this post (via ON DELETE CASCADE)
+    console.log('🗑️ Deleting post from database using admin client...');
+    const { data: deletedData, error: deleteError } = await supabaseAdmin
       .from('posts')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .select();
 
     if (deleteError) {
-      console.error('Database error:', deleteError);
+      console.error('❌ Database delete error:', deleteError);
+      console.error('❌ Error code:', deleteError.code);
+      console.error('❌ Error message:', deleteError.message);
+      console.error('❌ Error details:', JSON.stringify(deleteError, null, 2));
       throw deleteError;
     }
 
-    console.log('Post deleted successfully:', id);
+    console.log('✅ Post deleted from database:', deletedData);
+    console.log('✅ Deleted rows:', deletedData?.length || 0);
+
+    // Verify cascading deletes worked (optional - for logging)
+    const { count: remainingComments } = await supabaseAdmin
+      .from('comments')
+      .select('*', { count: 'exact', head: true })
+      .eq('post_id', id);
+
+    const { count: remainingLikes } = await supabaseAdmin
+      .from('likes')
+      .select('*', { count: 'exact', head: true })
+      .eq('post_id', id);
+
+    if (remainingComments && remainingComments > 0) {
+      console.warn(`Warning: ${remainingComments} comments still exist for deleted post ${id}`);
+    }
+    if (remainingLikes && remainingLikes > 0) {
+      console.warn(`Warning: ${remainingLikes} likes still exist for deleted post ${id}`);
+    }
+
+    console.log('✅✅✅ POST DELETED SUCCESSFULLY:', id);
+    console.log('✅ Cascading deletes: Comments and likes should be automatically deleted');
+    console.log('✅ Verification: Checking if post still exists...');
+
+    // Double-check that post is actually deleted (using admin client)
+    const { data: verifyPost } = await supabaseAdmin
+      .from('posts')
+      .select('id')
+      .eq('id', id)
+      .single();
+
+    if (verifyPost) {
+      console.error('❌❌❌ WARNING: Post still exists after deletion!');
+      console.error('❌ This should not happen - there may be a database issue');
+    } else {
+      console.log('✅✅✅ VERIFIED: Post no longer exists in database');
+    }
 
     res.json({
       success: true,
       message: 'Post deleted successfully',
+      deletedPostId: id,
+      verified: !verifyPost,
     });
   } catch (error: any) {
     console.error('Delete post error:', error);
