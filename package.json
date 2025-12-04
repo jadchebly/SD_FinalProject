@@ -7,8 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest",
-    "test:ui": "vitest --ui"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.17",
@@ -20,7 +22,8 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "daisyui": "^5.5.5",
-    "jsdom": "^27.2.0",
+    "jsdom": "^24.0.0",
+    "@vitest/coverage-v8": "^4.0.15",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
