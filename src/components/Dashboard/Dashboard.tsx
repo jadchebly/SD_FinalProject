@@ -23,7 +23,9 @@ export default function Dashboard() {
   const [showDeleteFromEditConfirm, setShowDeleteFromEditConfirm] = useState(false);
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
   const [showSuggestedUsers, setShowSuggestedUsers] = useState(false);
-  const [sortBy, setSortBy] = useState<"recent" | "likes">("recent");
+  const [sortBy, setSortBy] = useState<"recent" | "likes">(
+    () => (localStorage.getItem("dashboardSortBy") as "recent" | "likes") || "recent"
+  );
   const [shouldFocusComment, setShouldFocusComment] = useState(false);
   const commentInputRef = useRef<HTMLInputElement>(null);
 
@@ -122,6 +124,11 @@ export default function Dashboard() {
 
     setFilteredPosts(sorted);
   }, [posts, user, searchQuery, sortBy]);
+
+  // Persist sort preference so the dashboard remembers it across visits
+  useEffect(() => {
+    localStorage.setItem("dashboardSortBy", sortBy);
+  }, [sortBy]);
 
   // Listen for search updates from Navbar
   useEffect(() => {
