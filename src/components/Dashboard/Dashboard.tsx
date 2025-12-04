@@ -5,7 +5,7 @@ import type { Post, Comment } from "../../types/Post";
 import { AiFillLike } from "react-icons/ai";
 import { GiEgyptianProfile } from "react-icons/gi";
 import { useAuth } from "../../contexts/AuthContext";
-import { FaEdit, FaComment } from "react-icons/fa";
+import { FaEdit, FaComment, FaClock, FaFire } from "react-icons/fa";
 import api from "../../services/api";
 import SuggestedUsersModal from "../SuggestedUsersModal";
 
@@ -553,7 +553,29 @@ export default function Dashboard() {
     <div className="dashboard-container">
       <Navbar />
       <div className="dashboard-content">
-        <h1 className="dashboard-title">Dashboard</h1>
+        <div className="dashboard-header">
+          <h1 className="dashboard-title">Dashboard</h1>
+          <div className="sort-filter-container">
+            <button
+              type="button"
+              className={`sort-button ${sortBy === "recent" ? "active" : ""}`}
+              onClick={() => setSortBy("recent")}
+              aria-label="Sort posts by most recent"
+            >
+              <FaClock className="sort-icon" />
+              <span>Most Recent</span>
+            </button>
+            <button
+              type="button"
+              className={`sort-button ${sortBy === "likes" ? "active" : ""}`}
+              onClick={() => setSortBy("likes")}
+              aria-label="Sort posts by most likes"
+            >
+              <FaFire className="sort-icon" />
+              <span>Most Likes</span>
+            </button>
+          </div>
+        </div>
   {/* authMessage removed: posts require sign-in so unauthenticated likes shouldn't occur */}
         
         {!user ? (
@@ -564,9 +586,7 @@ export default function Dashboard() {
           <p className="no-posts">No posts yet. Create your first post!</p>
         ) : (
           <div className="posts-container">
-            {filteredPosts
-              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-              .map((post) => (
+            {filteredPosts.map((post) => (
                 <div 
                   key={post.id} 
                   className="post-card"
