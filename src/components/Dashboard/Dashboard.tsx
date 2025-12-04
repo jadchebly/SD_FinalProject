@@ -23,6 +23,7 @@ export default function Dashboard() {
   const [showDeleteFromEditConfirm, setShowDeleteFromEditConfirm] = useState(false);
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
   const [showSuggestedUsers, setShowSuggestedUsers] = useState(false);
+  const [sortBy, setSortBy] = useState<"recent" | "likes">("recent");
   const [shouldFocusComment, setShouldFocusComment] = useState(false);
   const commentInputRef = useRef<HTMLInputElement>(null);
 
@@ -83,23 +84,44 @@ export default function Dashboard() {
   // previously supported opening it via a custom event; that behavior has
   // been removed to avoid manual triggering.
 
-  // Filter posts based on search query
+  // Filter posts based on search query and apply sorting
   useEffect(() => {
     if (!user) {
       setFilteredPosts([]);
       return;
     }
 
-    if (!searchQuery.trim()) {
-      setFilteredPosts(posts);
-    } else {
-      const filtered = posts.filter((post) =>
-        post.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        post.content.toLowerCase().includes(searchQuery.toLowerCase())
+    // Apply search filtering
+    let next = posts;
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      next = posts.filter((post) =>
+        post.title.toLowerCase().includes(query) ||
+        post.content.toLowerCase().includes(query)
       );
-      setFilteredPosts(filtered);
     }
-  }, [posts, user, searchQuery]);
+
+    // Apply sorting – currently defaults to "recent".
+    // Future tasks will add UI controls to toggle sortBy.
+    const sorted = [...next].sort((a, b) => {
+      if (sortBy === "likes") {
+        const aLikes = a.likers?.length ?? a.likes ?? 0;
+        const bLikes = b.likers?.length ?? b.likes ?? 0;
+
+        if (bLikes !== aLikes) {
+          return bLikes - aLikes; // More likes first
+        }
+
+        // Tie‑breaker: newest first
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+
+      // Default: sort by most recent
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    setFilteredPosts(sorted);
+  }, [posts, user, searchQuery, sortBy]);
 
   // Listen for search updates from Navbar
   useEffect(() => {
