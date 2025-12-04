@@ -10,11 +10,61 @@
   margin: 0 auto;
 }
 
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 30px;
+  flex-wrap: wrap;
+}
+
 .dashboard-title {
   font-size: 32px;
   font-weight: 600;
   color: #1a1a1a;
-  margin-bottom: 30px;
+  margin: 0;
+}
+
+.sort-filter-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sort-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.03);
+  font-size: 13px;
+  font-weight: 500;
+  color: #1a1a1a;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.sort-button:hover {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
+.sort-button.active {
+  background: #0066ff;
+  border-color: #0066ff;
+  color: #ffffff;
+}
+
+.sort-button.active:hover {
+  background: #0052cc;
+  border-color: #0052cc;
+}
+
+.sort-icon {
+  font-size: 16px;
 }
 
 .no-posts {
