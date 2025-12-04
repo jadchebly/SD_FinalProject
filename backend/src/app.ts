@@ -5,6 +5,7 @@ import multer from 'multer';
 import { randomUUID } from 'crypto';
 import { supabase, supabaseAdmin } from './config/database';
 import { uploadImageToSupabase, deleteImageFromSupabase } from './services/uploadService';
+import { hashPassword, verifyPassword } from './utils/password';
 
 dotenv.config();
 
@@ -142,9 +143,8 @@ app.post('/api/signup', async (req, res) => {
     // Generate a UUID for the user
     const userId = randomUUID();
 
-    // In production, you should hash the password with bcrypt
-    // For now, we'll store it as plain text (NOT SECURE - for development only!)
-    const passwordHash = password; // TODO: Use bcrypt in production
+    // Hash the password using bcrypt
+    const passwordHash = await hashPassword(password);
 
     // Create user in database
     const { data: newUser, error: createError } = await supabase
@@ -216,9 +216,9 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // In production, use bcrypt to compare hashed passwords
-    // For now, simple comparison (NOT SECURE - for development only!)
-    if (user.password_hash !== password) {
+    // Verify password using bcrypt (with legacy plaintext fallback for migration)
+    const validPassword = await verifyPassword(password, user.password_hash || '');
+    if (!validPassword) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
@@ -1559,12 +1559,18 @@ app.delete('/api/posts/:id', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`Database test: http://localhost:${PORT}/test-db`);
-  console.log(`Signup endpoint: http://localhost:${PORT}/api/signup`);
-  console.log(`Upload endpoint: http://localhost:${PORT}/api/upload`);
-  console.log(`Create post endpoint: http://localhost:${PORT}/api/posts`);
-  console.log(`Delete post endpoint: http://localhost:${PORT}/api/posts/:id`);
-});
+// Export app for testing (Supertest)
+export default app;
+
+// Only start server if not in test environment
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/health`);
+    console.log(`Database test: http://localhost:${PORT}/test-db`);
+    console.log(`Signup endpoint: http://localhost:${PORT}/api/signup`);
+    console.log(`Upload endpoint: http://localhost:${PORT}/api/upload`);
+    console.log(`Create post endpoint: http://localhost:${PORT}/api/posts`);
+    console.log(`Delete post endpoint: http://localhost:${PORT}/api/posts/:id`);
+  });
+}
