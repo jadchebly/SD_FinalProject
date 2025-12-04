@@ -1559,12 +1559,16 @@ app.delete('/api/posts/:id', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`Database test: http://localhost:${PORT}/test-db`);
-  console.log(`Signup endpoint: http://localhost:${PORT}/api/signup`);
-  console.log(`Upload endpoint: http://localhost:${PORT}/api/upload`);
-  console.log(`Create post endpoint: http://localhost:${PORT}/api/posts`);
-  console.log(`Delete post endpoint: http://localhost:${PORT}/api/posts/:id`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/health`);
+    console.log(`Database test: http://localhost:${PORT}/test-db`);
+    console.log(`Signup endpoint: http://localhost:${PORT}/api/signup`);
+    console.log(`Upload endpoint: http://localhost:${PORT}/api/upload`);
+    console.log(`Create post endpoint: http://localhost:${PORT}/api/posts`);
+    console.log(`Delete post endpoint: http://localhost:${PORT}/api/posts/:id`);
+  });
+}
+
+export default app;
