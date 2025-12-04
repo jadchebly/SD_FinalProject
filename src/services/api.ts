@@ -52,7 +52,7 @@ class ApiService {
     return response.json();
   }
 
-  async getFollowing(id: string): Promise<any> {
+  async getFollowing(_id: string): Promise<any> {
     const response = await fetch(`${API_URL}/api/following`, {
       method: 'GET',
       credentials: 'include',
