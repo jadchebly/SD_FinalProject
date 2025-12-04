@@ -1,3 +1,8 @@
 To start frontend, run `npm run dev`
 
 To start backend, run `cd backend && npm run dev`
+
+`npm test -- --run` — Run all tests once and exit
+`npm test` — Run all tests in watch mode (keeps running and re-runs on changes)
+`npm run test:ui` — Open Vitest UI in the browser
+For a single run, use `npm test -- --run`. It runs all tests in src/pages/**tests**/
