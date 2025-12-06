@@ -97,7 +97,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
       api.setAuthHeaderProvider(() => {
         // If you later switch to HttpOnly cookies, return {} here.
-        return { ...(user && user.id ? { 'x-user-id': user.id } : {}) };
+        const headers = { ...(user && user.id ? { 'x-user-id': user.id } : {}) };
+        if (import.meta.env.PROD && user) {
+          console.log('[Auth] Setting auth headers, user.id:', user.id);
+        }
+        return headers;
       });
 
       api.setCurrentUserProvider(() => user);
@@ -123,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         setUser(userData);
         localStorage.setItem('user', JSON.stringify(userData));
+        console.log('[Auth] User set after login:', userData.id);
 
         // Refresh following list for the authenticated user
         try {
@@ -153,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         setUser(userData);
         localStorage.setItem('user', JSON.stringify(userData));
+        console.log('[Auth] User set after signup:', userData.id);
 
         // new users start with empty following
         setFollowingList([]);
