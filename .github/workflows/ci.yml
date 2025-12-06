@@ -1,10 +1,13 @@
 name: CI Pipeline
 
+# Workflow disabled for now - uncomment below to re-enable and delete workflow_dispatch
+# on:
+#   push:
+#     branches: [main, "**"]
+#   pull_request:
+#     branches: [main]
 on:
-  push:
-    branches: [main, "**"]
-  pull_request:
-    branches: [main]
+  workflow_dispatch: # Only allows manual triggering
 
 # Cancel in-progress runs when a new commit is pushed
 concurrency:
