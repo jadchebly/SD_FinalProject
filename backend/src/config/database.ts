@@ -103,20 +103,6 @@ async function initializePool() {
 
   const config = await getDbConfig();
   
-  console.log('🔌 Attempting to connect to database:', {
-    host: config.host,
-    port: config.port,
-    database: config.database,
-    user: config.user,
-    ssl: process.env.DB_SSL === 'true',
-  });
-  
-  // Warn if connecting to localhost in production
-  if (process.env.NODE_ENV === 'production' && (config.host === 'localhost' || config.host === '127.0.0.1')) {
-    console.error('⚠️  WARNING: Connecting to localhost database in production mode!');
-    console.error('⚠️  This should be the production database host, not localhost!');
-  }
-  
   pool = new Pool({
     host: config.host,
     port: config.port,
