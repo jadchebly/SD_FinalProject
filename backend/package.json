@@ -15,7 +15,6 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.946.0",
     "@aws-sdk/client-secrets-manager": "^3.946.0",
-    "@supabase/supabase-js": "^2.86.0",
     "@types/pg": "^8.15.6",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",

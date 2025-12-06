@@ -189,7 +189,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     try {
       console.log('Updating avatar for user:', user.id);
-      // Update avatar in Supabase
       const response = await api.updateUserAvatar(user.id, avatar);
       console.log('Avatar update response:', response);
       
@@ -211,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('user', JSON.stringify(updatedUser));
       }
     } catch (error) {
-      console.error('Failed to update avatar in Supabase:', error);
+      console.error('Failed to update avatar in db:', error);
       // Fallback: update local state even if API call fails
       const updatedUser = { ...user, avatar };
       setUser(updatedUser);

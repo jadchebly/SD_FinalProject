@@ -181,7 +181,7 @@ function getPool(): Pool {
   return pool;
 }
 
-// Database query helper class that mimics Supabase's query builder API
+// Database query helper class with PostgreSQL query builder API
 // Implements thenable interface so it can be awaited directly
 class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: number }> {
   private table: string;
@@ -200,7 +200,7 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
     this.table = table;
   }
 
-  // Make this class thenable so it can be awaited directly (like Supabase)
+  // Make this class thenable so it can be awaited directly
   then<TResult1 = { data: any; error: any; count?: number }, TResult2 = never>(
     onfulfilled?: ((value: { data: any; error: any; count?: number }) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
@@ -216,7 +216,7 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
     }
     
     if (typeof fields === 'string') {
-      // Handle Supabase-style nested selects like "users:user_id (id, username, avatar_url)"
+      // Handle nested selects with joins like "users:user_id (id, username, avatar_url)"
       if (fields.includes('(') && fields.includes(':')) {
         // Parse nested select - for now, we'll handle this in the query execution
         this.selectFields = [fields];
@@ -245,7 +245,7 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
   }
 
   or(condition: string): this {
-    // Parse Supabase-style OR conditions like "email.eq.test@example.com,username.eq.test"
+    // Parse OR conditions like "email.eq.test@example.com,username.eq.test"
     // Store as a special OR condition group
     const parts = condition.split(',');
     const orConditions: Array<{ field: string; operator: string; value: any }> = [];
@@ -421,7 +421,7 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
         // SELECT query
         let selectClause = '';
         
-        // Handle nested selects (Supabase-style joins)
+        // Handle nested selects with joins
         if (this.selectFields.length === 1 && this.selectFields[0].includes('(') && this.selectFields[0].includes(':')) {
           // Parse: "users:user_id (id, username, avatar_url)"
           const match = this.selectFields[0].match(/(\w+):(\w+)\s*\(([^)]+)\)/);
@@ -489,7 +489,7 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
         return { data: null, error: null, count };
       }
       
-      // Transform result to match Supabase format
+      // Transform result format
       let data = result.rows;
       
       // Handle nested select results (transform joined data)
@@ -531,19 +531,20 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
   }
 }
 
-// Create a database client that mimics Supabase's API
+// Create a database client with query builder API
 class DatabaseClient {
   from(table: string): DatabaseQuery {
     return new DatabaseQuery(table);
   }
 }
 
-// Export database clients (mimicking supabase and supabaseAdmin)
-export const supabase = new DatabaseClient();
-export const supabaseAdmin = new DatabaseClient(); // Same client for RDS (no RLS)
+// Export database clients
+// Note: Both are the same for RDS (no Row Level Security)
+export const db = new DatabaseClient();
+export const dbAdmin = new DatabaseClient(); // Same as db for RDS
 
 // Export pool for direct queries if needed
-export const db = getPool();
+export const dbPool = getPool();
 
 // Test connection function
 export async function testConnection(): Promise<boolean> {
@@ -558,4 +559,4 @@ export async function testConnection(): Promise<boolean> {
   }
 }
 
-export default supabase;
+export default db;
