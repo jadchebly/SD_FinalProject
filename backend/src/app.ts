@@ -3,12 +3,53 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import { db, dbAdmin } from './config/database';
 import { uploadImageToS3, deleteImageFromS3 } from './services/s3Service';
 
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      
+      // Allow localhost for development
+      if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
+        return callback(null, true);
+      }
+      
+      // Use production URL if in production, otherwise use development URL
+      const isProduction = process.env.NODE_ENV === 'production';
+      const frontendUrl = isProduction 
+        ? process.env.FRONTEND_URL_PRODUCTION 
+        : process.env.FRONTEND_URL;
+      
+      const allowedOrigins = [
+        frontendUrl,
+        'http://localhost:5173',
+        'http://localhost:5174',
+      ].filter(Boolean);
+      
+      // Check exact match first
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      
+      // In production, also allow Azure Static Web Apps domains
+      if (isProduction && origin.includes('.azurestaticapps.net')) {
+        return callback(null, true);
+      }
+      
+      callback(new Error('Not allowed by CORS'));
+    },
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
 const PORT = process.env.PORT || 3000;
 
 // Configure multer for file uploads (store in memory)
@@ -833,6 +874,26 @@ app.post('/api/posts/:id/like', async (req, res) => {
       throw error;
     }
 
+    // Get updated like count and likers
+    const { data: likes } = await db
+      .from('likes')
+      .select('user_id')
+      .eq('post_id', id);
+
+    const likers = likes?.map((l: any) => l.user_id) || [];
+
+    // Emit real-time update to all users viewing this post
+    const room = `post-${id}`;
+    const socketsInRoom = await io.in(room).fetchSockets();
+    console.log(`Emitting like-updated to room ${room}, ${socketsInRoom.length} socket(s) in room`);
+    io.to(room).emit('like-updated', {
+      postId: id,
+      likes: likers.length,
+      likers: likers,
+      action: 'like',
+      userId: userId,
+    });
+
     res.json({ success: true, message: 'Post liked' });
   } catch (error: any) {
     console.error('Like error:', error);
@@ -862,6 +923,26 @@ app.delete('/api/posts/:id/like', async (req, res) => {
     if (error) {
       throw error;
     }
+
+    // Get updated like count and likers
+    const { data: likes } = await db
+      .from('likes')
+      .select('user_id')
+      .eq('post_id', id);
+
+    const likers = likes?.map((l: any) => l.user_id) || [];
+
+    // Emit real-time update to all users viewing this post
+    const room = `post-${id}`;
+    const socketsInRoom = await io.in(room).fetchSockets();
+    console.log(`Emitting like-updated to room ${room}, ${socketsInRoom.length} socket(s) in room`);
+    io.to(room).emit('like-updated', {
+      postId: id,
+      likes: likers.length,
+      likers: likers,
+      action: 'unlike',
+      userId: userId,
+    });
 
     res.json({ success: true, message: 'Post unliked' });
   } catch (error: any) {
@@ -895,13 +976,78 @@ app.get('/api/posts/:id/comments', async (req, res) => {
       throw error;
     }
 
-    const formattedComments = comments?.map(comment => ({
-      id: comment.id,
-      text: comment.text,
-      user: comment.users?.username || 'Unknown',
-      userPhoto: comment.users?.avatar_url || null,
-      createdAt: comment.created_at,
-    })) || [];
+    const formattedComments = comments?.map(comment => {
+      // Format createdAt to ensure it's a valid ISO string
+      let createdAtValue = comment.created_at;
+      let createdAtDate: Date;
+      
+      if (createdAtValue) {
+        if (createdAtValue instanceof Date) {
+          createdAtDate = createdAtValue;
+          createdAtValue = createdAtDate.toISOString();
+        } else if (typeof createdAtValue === 'string') {
+          // If it's already an ISO string, use it as-is
+          if (createdAtValue.includes('T') && (createdAtValue.includes('Z') || createdAtValue.match(/[+-]\d{2}:\d{2}$/))) {
+            // Already in ISO format
+            createdAtDate = new Date(createdAtValue);
+            createdAtValue = createdAtDate.toISOString();
+          } else {
+            // Try to parse and convert to ISO
+            createdAtDate = new Date(createdAtValue);
+            if (!isNaN(createdAtDate.getTime())) {
+              createdAtValue = createdAtDate.toISOString();
+            } else {
+              // If parsing fails, assume UTC and append 'Z'
+              createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+              createdAtDate = new Date(createdAtValue);
+            }
+          }
+        } else {
+          // If it's another type, try to convert
+          createdAtDate = new Date(createdAtValue);
+          if (!isNaN(createdAtDate.getTime())) {
+            createdAtValue = createdAtDate.toISOString();
+          } else {
+            createdAtDate = new Date();
+            createdAtValue = createdAtDate.toISOString();
+          }
+        }
+      } else {
+        createdAtDate = new Date();
+        createdAtValue = createdAtDate.toISOString();
+      }
+
+      // Calculate timeAgo on backend using server time
+      const now = new Date();
+      const diffInSeconds = Math.floor((now.getTime() - createdAtDate.getTime()) / 1000);
+      let timeAgo: string;
+      
+      if (diffInSeconds < 0) {
+        timeAgo = 'just now';
+      } else if (diffInSeconds < 10) {
+        timeAgo = 'just now';
+      } else if (diffInSeconds < 60) {
+        timeAgo = `${diffInSeconds}s ago`;
+      } else if (diffInSeconds < 3600) {
+        const minutes = Math.floor(diffInSeconds / 60);
+        timeAgo = `${minutes}m ago`;
+      } else if (diffInSeconds < 86400) {
+        const hours = Math.floor(diffInSeconds / 3600);
+        timeAgo = `${hours}h ago`;
+      } else {
+        const days = Math.floor(diffInSeconds / 86400);
+        timeAgo = `${days}d ago`;
+      }
+
+      return {
+        id: comment.id,
+        text: comment.text,
+        user: comment.users?.username || 'Unknown',
+        userPhoto: comment.users?.avatar_url || null,
+        createdAt: createdAtValue,
+        timeAgo: timeAgo, // Pre-calculated on backend
+      };
+    }) || [];
 
     res.json({
       success: true,
@@ -931,36 +1077,172 @@ app.post('/api/posts/:id/comments', async (req, res) => {
       return res.status(400).json({ error: 'Comment text is required' });
     }
 
-    const { data: comment, error } = await db
+    // Insert the comment into the database
+    const trimmedText = text.trim();
+    console.log('💬 Inserting comment into database:', {
+      postId: id,
+      userId: userId,
+      textLength: trimmedText.length,
+      dbHost: process.env.DB_HOST || 'not set',
+    });
+    
+    const { data: insertedComment, error: insertError } = await db
       .from('comments')
       .insert({
         post_id: id,
         user_id: userId,
-        text: text.trim(),
+        text: trimmedText,
       })
-      .select(`
-        *,
-        users:user_id (
-          id,
-          username,
-          avatar_url
-        )
-      `)
+      .select('id, text, created_at')
       .single();
 
-    if (error) {
-      throw error;
+    if (insertError || !insertedComment) {
+      console.error('Failed to insert comment:', insertError);
+      throw insertError || new Error('Failed to create comment');
     }
+
+    // Handle case where .single() might return an array (extract first element)
+    const comment = Array.isArray(insertedComment) ? insertedComment[0] : insertedComment;
+    
+    if (!comment) {
+      console.error('Inserted comment is null or empty:', insertedComment);
+      throw new Error('Comment insert succeeded but returned no data');
+    }
+
+    // Verify we have the required fields
+    if (!comment.id || !comment.text) {
+      console.error('Inserted comment missing required fields:', comment);
+      throw new Error('Comment insert succeeded but missing required fields');
+    }
+    
+    console.log('✅ Comment inserted successfully:', {
+      id: comment.id,
+      text: comment.text,
+      hasId: !!comment.id,
+      hasText: !!comment.text,
+    });
+
+    // Fetch user data separately to ensure we have the correct username
+    const { data: userData, error: userError } = await db
+      .from('users')
+      .select('username, avatar_url')
+      .eq('id', userId)
+      .single();
+
+    if (userError) {
+      console.error('Failed to fetch user data:', userError);
+      // Continue even if user fetch fails, we'll use fallback
+    }
+
+    // Format comment for response - ensure createdAt is a valid ISO string
+    let createdAtValue = comment.created_at;
+    let createdAtDate: Date;
+    
+    if (createdAtValue) {
+      // Convert to Date object for calculations
+      if (createdAtValue instanceof Date) {
+        createdAtDate = createdAtValue;
+        createdAtValue = createdAtDate.toISOString();
+      } else if (typeof createdAtValue === 'string') {
+        createdAtDate = new Date(createdAtValue);
+        // If no timezone info, assume UTC and append 'Z'
+        if (!createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/)) {
+          createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+          createdAtDate = new Date(createdAtValue);
+        } else {
+          createdAtValue = createdAtDate.toISOString();
+        }
+      } else {
+        createdAtDate = new Date(createdAtValue);
+        createdAtValue = createdAtDate.toISOString();
+      }
+    } else {
+      // Fallback to current time if missing
+      createdAtDate = new Date();
+      createdAtValue = createdAtDate.toISOString();
+    }
+
+    // Calculate timeAgo on backend using server time
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - createdAtDate.getTime()) / 1000);
+    let timeAgo: string;
+    
+    if (diffInSeconds < 0) {
+      timeAgo = 'just now';
+    } else if (diffInSeconds < 10) {
+      timeAgo = 'just now';
+    } else if (diffInSeconds < 60) {
+      timeAgo = `${diffInSeconds}s ago`;
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60);
+      timeAgo = `${minutes}m ago`;
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600);
+      timeAgo = `${hours}h ago`;
+    } else {
+      const days = Math.floor(diffInSeconds / 86400);
+      timeAgo = `${days}d ago`;
+    }
+
+    // Get username and avatar from user data
+    const username = userData?.username || 'Unknown';
+    const userPhoto = userData?.avatar_url || null;
+
+    // Log for debugging
+    console.log('Comment created successfully:', {
+      commentId: comment.id,
+      userId: userId,
+      username: username,
+      hasUserData: !!userData,
+      timeAgo: timeAgo,
+      diffInSeconds: diffInSeconds,
+    });
+
+    const formattedComment = {
+      id: comment.id,
+      text: comment.text || trimmedText, // Fallback to original text if needed
+      user: username,
+      userPhoto: userPhoto,
+      createdAt: createdAtValue,
+      timeAgo: timeAgo, // Pre-calculated on backend
+    };
+
+    // Verify formatted comment has all required fields before emitting
+    if (!formattedComment.id || !formattedComment.text) {
+      console.error('Formatted comment missing required fields:', formattedComment);
+      console.error('Inserted comment was:', insertedComment);
+      throw new Error('Comment formatting failed - missing required fields');
+    }
+
+    // Emit real-time update to all users viewing this post (Observer Pattern via Socket.io rooms)
+    const room = `post-${id}`;
+    const socketsInRoom = await io.in(room).fetchSockets();
+    console.log(`Emitting new-comment to room ${room}, ${socketsInRoom.length} socket(s) in room`);
+    
+    // Create the event payload with explicit field names
+    const eventPayload = {
+      postId: String(id),
+      comment: {
+        id: String(formattedComment.id),
+        text: String(formattedComment.text),
+        user: String(formattedComment.user),
+        userPhoto: formattedComment.userPhoto,
+        createdAt: String(formattedComment.createdAt),
+      },
+    };
+    
+    console.log('Event payload being emitted:', JSON.stringify(eventPayload, null, 2));
+    console.log('Comment object keys:', Object.keys(eventPayload.comment));
+    console.log('Comment id:', eventPayload.comment.id);
+    console.log('Comment text:', eventPayload.comment.text);
+    
+    io.to(room).emit('new-comment', eventPayload);
+    
+    console.log(`Broadcasted comment to ${socketsInRoom.length} observer(s) in room ${room}`);
 
     res.json({
       success: true,
-      comment: {
-        id: comment.id,
-        text: comment.text,
-        user: comment.users?.username || 'Unknown',
-        userPhoto: comment.users?.avatar_url || null,
-        createdAt: comment.created_at,
-      },
+      comment: formattedComment,
     });
   } catch (error: any) {
     console.error('Add comment error:', error);
@@ -1323,9 +1605,86 @@ app.post('/api/posts', async (req, res) => {
 
     console.log('Post created successfully:', data.id);
 
+    // Handle case where .single() might return an array
+    const post = Array.isArray(data) ? data[0] : data;
+    
+    if (!post) {
+      throw new Error('Post creation succeeded but returned no data');
+    }
+
+    // Get user info for the post
+    const { data: userData } = await db
+      .from('users')
+      .select('username, avatar_url')
+      .eq('id', userId)
+      .single();
+
+    // Format createdAt to ISO string
+    let createdAtValue = post.created_at;
+    if (createdAtValue instanceof Date) {
+      createdAtValue = createdAtValue.toISOString();
+    } else if (typeof createdAtValue === 'string') {
+      if (!createdAtValue.includes('T') || (!createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/))) {
+        const dateObj = new Date(createdAtValue);
+        if (!isNaN(dateObj.getTime())) {
+          createdAtValue = dateObj.toISOString();
+        } else {
+          createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+        }
+      }
+    }
+
+    // Format the post like the feed endpoint does
+    const formattedPost = {
+      id: post.id,
+      title: post.title,
+      content: post.content,
+      type: post.type,
+      image_url: post.image_url,
+      video_url: post.video_url,
+      created_at: createdAtValue,
+      user_id: post.user_id,
+      user: userData?.username || username || 'Unknown',
+      likes: 0,
+      likers: [],
+      commentsCount: 0,
+      hasLiked: false,
+    };
+
+    // Get all followers of the post creator
+    const { data: followers } = await db
+      .from('follows')
+      .select('follower_id')
+      .eq('following_id', userId);
+
+    const followerIds = followers?.map(f => f.follower_id) || [];
+    
+    // Also include the post creator themselves so they see their own post
+    const userIdsToNotify = [...new Set([...followerIds, userId])];
+
+    console.log(`📢 Broadcasting new post to ${userIdsToNotify.length} user(s):`, {
+      postId: post.id,
+      authorId: userId,
+      authorUsername: userData?.username || username,
+      followers: followerIds.length,
+    });
+
+    // Emit new post to all followers and the creator
+    // We'll use a user-specific room pattern: 'user-{userId}'
+    userIdsToNotify.forEach(userIdToNotify => {
+      io.to(`user-${userIdToNotify}`).emit('new-post', {
+        post: formattedPost,
+      });
+    });
+
+    // Also broadcast to a general feed room for users who are on the dashboard
+    io.to('feed').emit('new-post', {
+      post: formattedPost,
+    });
+
     res.json({
       success: true,
-      post: data,
+      post: post,
     });
   } catch (error: any) {
     console.error('Create post error:', error);
@@ -1588,7 +1947,61 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-app.listen(PORT, () => {
+// Socket.io connection handling
+io.on('connection', (socket) => {
+  console.log('Socket.io client connected:', socket.id, 'transport:', socket.conn.transport.name);
+
+  // Join user-specific room for receiving new posts from people they follow
+  socket.on('join-user', (userId: string) => {
+    if (userId) {
+      const room = `user-${userId}`;
+      socket.join(room);
+      console.log(`Socket ${socket.id} joined user room: ${room}`);
+    }
+  });
+
+  // Join feed room for general feed updates
+  socket.on('join-feed', () => {
+    socket.join('feed');
+    console.log(`Socket ${socket.id} joined feed room`);
+  });
+
+  // Leave feed room
+  socket.on('leave-feed', () => {
+    socket.leave('feed');
+    console.log(`Socket ${socket.id} left feed room`);
+  });
+
+  // Join room for a specific post to receive updates
+  socket.on('join-post', (postId: string) => {
+    if (postId) {
+      const room = `post-${postId}`;
+      socket.join(room);
+      console.log(`Socket ${socket.id} joined room: ${room}`);
+      // Verify room membership
+      const rooms = Array.from(socket.rooms);
+      console.log(`Socket ${socket.id} is now in rooms:`, rooms);
+    }
+  });
+
+  // Leave room when user closes the post
+  socket.on('leave-post', (postId: string) => {
+    if (postId) {
+      socket.leave(`post-${postId}`);
+      console.log(`Socket ${socket.id} left room: post-${postId}`);
+    }
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('Socket.io client disconnected:', socket.id, 'reason:', reason);
+  });
+
+  socket.on('error', (error) => {
+    console.error('Socket.io error:', error);
+  });
+});
+
+httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`Database test: http://localhost:${PORT}/test-db`);

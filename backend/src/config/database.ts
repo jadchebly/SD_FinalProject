@@ -103,14 +103,6 @@ async function initializePool() {
 
   const config = await getDbConfig();
   
-  console.log('Attempting to connect to database:', {
-    host: config.host,
-    port: config.port,
-    database: config.database,
-    user: config.user,
-    ssl: process.env.DB_SSL === 'true',
-  });
-  
   pool = new Pool({
     host: config.host,
     port: config.port,

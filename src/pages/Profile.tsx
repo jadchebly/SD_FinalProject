@@ -4,9 +4,10 @@ import { useParams } from 'react-router-dom';
 import Navbar from '../components/Dashboard/Navbar/Navbar';
 import { GiEgyptianProfile } from 'react-icons/gi';
 import { useRef, useState, useEffect, useMemo } from 'react';
-import type { Post } from '../types/Post';
+import type { Post, Comment } from '../types/Post';
 import { AiFillLike } from 'react-icons/ai';
 import api from '../services/api';
+import { getSocket } from '../services/socket';
 import './Profile.css';
 import '../components/Dashboard/Dashboard.css';
 
@@ -24,6 +25,14 @@ export default function Profile() {
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
   const [showFollowersModal, setShowFollowersModal] = useState(false);
+
+  // Initialize socket connection on mount
+  useEffect(() => {
+    getSocket(); // Initialize socket connection
+    return () => {
+      // Don't disconnect on unmount, keep connection alive
+    };
+  }, []);
   const [showFollowingModal, setShowFollowingModal] = useState(false);
   const [followersList, setFollowersList] = useState<any[]>([]);
   const [followingList, setFollowingList] = useState<any[]>([]);
@@ -191,22 +200,64 @@ export default function Profile() {
     loadProfile();
   }, [profileId]);
 
-  const getTimeAgo = (createdAt: string): string => {
-    const now = new Date();
-    const postDate = new Date(createdAt);
-    const diffInSeconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
+  const getTimeAgo = (createdAt: string | Date | undefined): string => {
+    if (!createdAt) return 'just now';
+    
+    try {
+      const now = new Date();
+      let postDate: Date;
+      
+      // Handle different input types
+      if (createdAt instanceof Date) {
+        postDate = createdAt;
+      } else if (typeof createdAt === 'string') {
+        // Ensure the string is a valid ISO date
+        let dateString = createdAt;
+        
+        // If it's not already in ISO format, try to convert it
+        if (!dateString.includes('T') && !dateString.includes('Z') && !dateString.match(/[+-]\d{2}:\d{2}$/)) {
+          // Try to parse as a date string and convert to ISO
+          const tempDate = new Date(dateString);
+          if (!isNaN(tempDate.getTime())) {
+            dateString = tempDate.toISOString();
+          }
+        }
+        
+        postDate = new Date(dateString);
+      } else {
+        return 'just now';
+      }
+      
+      // Check if date is valid
+      if (isNaN(postDate.getTime())) {
+        console.warn('Invalid date in getTimeAgo:', createdAt);
+        return 'just now';
+      }
+      
+      const diffInSeconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
+      
+      // Handle negative differences (future dates) - return "just now" for very recent or future dates
+      if (diffInSeconds < 0) {
+        return 'just now';
+      }
 
-    if (diffInSeconds < 60) {
-      return `${diffInSeconds}s ago`;
-    } else if (diffInSeconds < 3600) {
-      const minutes = Math.floor(diffInSeconds / 60);
-      return `${minutes}m ago`;
-    } else if (diffInSeconds < 86400) {
-      const hours = Math.floor(diffInSeconds / 3600);
-      return `${hours}h ago`;
-    } else {
-      const days = Math.floor(diffInSeconds / 86400);
-      return `${days}d ago`;
+      if (diffInSeconds < 10) {
+        return 'just now';
+      } else if (diffInSeconds < 60) {
+        return `${diffInSeconds}s ago`;
+      } else if (diffInSeconds < 3600) {
+        const minutes = Math.floor(diffInSeconds / 60);
+        return `${minutes}m ago`;
+      } else if (diffInSeconds < 86400) {
+        const hours = Math.floor(diffInSeconds / 3600);
+        return `${hours}h ago`;
+      } else {
+        const days = Math.floor(diffInSeconds / 86400);
+        return `${days}d ago`;
+      }
+    } catch (error) {
+      console.warn('Error in getTimeAgo:', error, 'for date:', createdAt);
+      return 'just now';
     }
   };
 
@@ -319,17 +370,11 @@ export default function Profile() {
     try {
       if (isLiked) {
         await api.unlikePost(post.id);
-        setUserPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, likers: (p.likers || []).filter(id => id !== userId) } : p));
-        if (selectedPost && selectedPost.id === post.id) {
-          setSelectedPost({ ...selectedPost, likers: (selectedPost.likers || []).filter(id => id !== userId) });
-        }
       } else {
         await api.likePost(post.id);
-        setUserPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, likers: [...(p.likers || []), userId] } : p));
-        if (selectedPost && selectedPost.id === post.id) {
-          setSelectedPost({ ...selectedPost, likers: [...(selectedPost.likers || []), userId] });
-        }
       }
+      // Don't do optimistic update - let the socket event handle the update
+      // This ensures we always have the correct count from the backend database
     } catch (err) {
       console.error('Failed to toggle like:', err);
     }
@@ -355,46 +400,13 @@ export default function Profile() {
     setCommentInputs({ ...commentInputs, [postId]: "" });
 
     try {
-      const res = await api.addComment(postId, commentText);
-      if (res && res.success) {
-        // Normalize backend comment to Comment shape
-        const c = res.comment;
-        const newComment = {
-          id: c?.id ?? `c_${Date.now()}`,
-          text: commentText,
-          user: typeof c?.user === 'string' ? c.user : (c?.user?.username ?? user.username),
-          userPhoto: c?.userPhoto ?? c?.user?.avatar_url ?? undefined,
-          createdAt: c?.createdAt ?? c?.created_at ?? new Date().toISOString(),
-        };
-        setUserPosts((prev) =>
-          prev.map((p) =>
-            p.id === postId ? { ...p, comments: [...(p.comments || []), newComment] } : p
-          )
-        );
-        // keep selectedPost in sync if modal is open for this post
-        if (selectedPost && selectedPost.id === postId) {
-          setSelectedPost({ ...selectedPost, comments: [...(selectedPost.comments || []), newComment] });
-        }
-      } else {
-        // optimistic comment in correct shape
-        const newComment = {
-          id: `c_${Date.now()}`,
-          text: commentText,
-          user: user.username,
-          userPhoto: user.avatar ?? undefined,
-          createdAt: new Date().toISOString(),
-        };
-        setUserPosts((prev) =>
-          prev.map((p) =>
-            p.id === postId ? { ...p, comments: [...(p.comments || []), newComment] } : p
-          )
-        );
-        if (selectedPost && selectedPost.id === postId) {
-          setSelectedPost({ ...selectedPost, comments: [...(selectedPost.comments || []), newComment] });
-        }
-      }
+      await api.addComment(postId, commentText);
+      // Don't do optimistic update - let the socket event handle the update
+      // This ensures we always have the correct comment data (user, date, etc.) from the backend
     } catch (err) {
       console.error('Failed to add comment:', err);
+      // Restore input on error
+      setCommentInputs({ ...commentInputs, [postId]: commentText });
     }
   };
 
@@ -404,13 +416,29 @@ export default function Profile() {
       const cRes = await api.getComments(post.id);
       let mapped: any[] = post.comments || [];
       if (cRes && cRes.success && Array.isArray(cRes.comments)) {
-        mapped = cRes.comments.map((c: any) => ({
-          id: c.id,
-          text: c.text,
-          user: (c.user && (c.user.username || c.user)) || c.user || 'Unknown',
-          userPhoto: c.userPhoto || c.user?.avatar_url || undefined,
-          createdAt: c.createdAt || c.created_at || new Date().toISOString(),
-        }));
+        mapped = cRes.comments.map((c: any) => {
+          // Ensure createdAt is properly formatted
+          let createdAtValue = c.createdAt || c.created_at;
+          if (!createdAtValue) {
+            createdAtValue = new Date().toISOString();
+          } else if (typeof createdAtValue === 'string') {
+            // If no timezone info, assume UTC and append 'Z'
+            if (!createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/)) {
+              createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+            }
+          } else {
+            createdAtValue = new Date(createdAtValue).toISOString();
+          }
+
+          return {
+            id: c.id,
+            text: c.text || '',
+            user: (c.user && (c.user.username || c.user)) || c.user || 'Unknown',
+            userPhoto: c.userPhoto || c.user?.avatar_url || undefined,
+            createdAt: createdAtValue,
+            timeAgo: c.timeAgo, // Use backend-calculated timeAgo if available
+          };
+        });
       }
 
       const updated = { ...post, comments: mapped } as Post;
@@ -421,6 +449,154 @@ export default function Profile() {
       setSelectedPost(post);
     }
   };
+
+  // Socket.io real-time updates
+  useEffect(() => {
+    const socket = getSocket();
+
+    // Wait for connection before joining rooms
+    const setupSocket = () => {
+      const joinRoom = () => {
+        if (selectedPost && socket.connected) {
+          socket.emit('join-post', selectedPost.id);
+          console.log('Joined post room:', selectedPost.id);
+        }
+      };
+
+      if (socket.connected) {
+        joinRoom();
+      } else {
+        socket.once('connect', joinRoom);
+        // Also try after a short delay in case connection is in progress
+        setTimeout(() => {
+          if (socket.connected) {
+            joinRoom();
+          }
+        }, 100);
+      }
+    };
+
+    setupSocket();
+
+    // Listen for new comments
+    const handleNewComment = (data: { postId: string; comment: Comment }) => {
+      console.log('Received new-comment event:', data);
+      
+      // Ensure all required fields are present
+      if (!data.comment || !data.comment.id || !data.comment.text) {
+        console.error('Invalid comment data received:', data);
+        return;
+      }
+      
+      // Format the comment date - ensure it's a valid ISO string
+      let createdAtValue = data.comment.createdAt;
+      if (!createdAtValue) {
+        createdAtValue = new Date().toISOString();
+      } else if (typeof createdAtValue === 'string') {
+        // If no timezone info, assume UTC and append 'Z'
+        if (!createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/)) {
+          createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+        }
+      } else {
+        // If it's not a string, convert to ISO string
+        createdAtValue = new Date(createdAtValue).toISOString();
+      }
+
+      const formattedComment: Comment = {
+        id: data.comment.id,
+        text: data.comment.text || '',
+        user: data.comment.user || 'Unknown',
+        userPhoto: data.comment.userPhoto || undefined,
+        createdAt: createdAtValue,
+        timeAgo: data.comment.timeAgo, // Use backend-calculated timeAgo if available
+      };
+
+      console.log('Formatted comment:', formattedComment);
+
+      // Update selectedPost if it's the same post
+      if (selectedPost && selectedPost.id === data.postId) {
+        setSelectedPost((prev) => {
+          if (!prev || prev.id !== data.postId) return prev;
+          // Check if comment already exists (avoid duplicates)
+          const exists = prev.comments?.some(c => c.id === formattedComment.id);
+          if (exists) return prev;
+          return {
+            ...prev,
+            comments: [...(prev.comments || []), formattedComment],
+          };
+        });
+      }
+
+      // Update userPosts array (always update if post exists)
+      setUserPosts((prevPosts) => {
+        return prevPosts.map((post) => {
+          if (post.id === data.postId) {
+            const exists = post.comments?.some(c => c.id === formattedComment.id);
+            if (exists) return post;
+            return {
+              ...post,
+              comments: [...(post.comments || []), formattedComment],
+            };
+          }
+          return post;
+        });
+      });
+    };
+
+    // Listen for like updates
+    const handleLikeUpdate = (data: { postId: string; likes: number; likers: string[]; action: string; userId: string }) => {
+      // Update selectedPost if it's the same post
+      if (selectedPost && selectedPost.id === data.postId) {
+        setSelectedPost((prev) => {
+          if (!prev || prev.id !== data.postId) return prev;
+          return {
+            ...prev,
+            likes: data.likes,
+            likers: data.likers,
+          };
+        });
+      }
+
+      // Update userPosts array
+      setUserPosts((prevPosts) => {
+        return prevPosts.map((post) => {
+          if (post.id === data.postId) {
+            return {
+              ...post,
+              likes: data.likes,
+              likers: data.likers,
+            };
+          }
+          return post;
+        });
+      });
+    };
+
+    socket.on('new-comment', handleNewComment);
+    socket.on('like-updated', handleLikeUpdate);
+
+    // Handle reconnection - rejoin rooms when reconnected
+    const handleReconnect = () => {
+      console.log('Socket reconnected, rejoining rooms');
+      if (selectedPost) {
+        socket.emit('join-post', selectedPost.id);
+      }
+      // Rejoin all post rooms
+      userPosts.forEach(post => {
+        socket.emit('join-post', post.id);
+      });
+    };
+
+    socket.on('reconnect', handleReconnect);
+
+    // Cleanup
+    return () => {
+      // Don't leave rooms on cleanup - keep them joined for real-time updates
+      socket.off('new-comment', handleNewComment);
+      socket.off('like-updated', handleLikeUpdate);
+      socket.off('reconnect', handleReconnect);
+    };
+  }, [selectedPost, userPosts]);
 
   const handleOpenFollowersModal = async () => {
     if (!user || !profileInfo) return;
@@ -733,7 +909,7 @@ export default function Profile() {
                       <div className="comment-content">
                         <div className="comment-header">
                           <span className="comment-username">{c.user}</span>
-                          <span className="comment-time">{getTimeAgo(c.createdAt)}</span>
+                          <span className="comment-time">{c.timeAgo || getTimeAgo(c.createdAt)}</span>
                         </div>
                         <p className="comment-text">{c.text}</p>
                       </div>
