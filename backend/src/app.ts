@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
 import { supabase, supabaseAdmin } from './config/database';
-import { uploadImageToSupabase, deleteImageFromSupabase } from './services/uploadService';
+import { uploadImageToS3, deleteImageFromS3 } from './services/s3Service';
 
 dotenv.config();
 
@@ -90,8 +90,8 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    console.log('Uploading to Supabase...');
-    const result = await uploadImageToSupabase(req.file);
+    console.log('Uploading to S3...');
+    const result = await uploadImageToS3(req.file);
     console.log('Upload successful:', result.url);
     
     res.json({
@@ -1476,7 +1476,7 @@ app.delete('/api/posts/:id', async (req, res) => {
     if (post.image_url) {
       console.log('Deleting associated image:', post.image_url);
       try {
-        await deleteImageFromSupabase(post.image_url);
+        await deleteImageFromS3(post.image_url);
         console.log('Image deletion completed successfully');
       } catch (error: any) {
         console.error('Failed to delete image from storage:', error);
