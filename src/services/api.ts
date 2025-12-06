@@ -1,7 +1,7 @@
 // Use production URL if in production, otherwise use development URL or fallback
 const isProduction = import.meta.env.PROD;
 const API_URL = isProduction
-  ? (import.meta.env.VITE_BACKEND_URL_PRODUCTION || import.meta.env.VITE_API_URL)
+  ? (import.meta.env.VITE_BACKEND_URL_PRODUCTION || import.meta.env.VITE_API_URL || 'http://localhost:3000')
   : (import.meta.env.VITE_API_URL || 'http://localhost:3000');
 
 type HeaderProvider = () => Promise<Record<string,string>> | Record<string,string>;
