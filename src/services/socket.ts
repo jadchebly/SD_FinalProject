@@ -20,7 +20,7 @@ export function getSocket(): Socket {
     });
 
     socket.on('connect', () => {
-      console.log('Socket.io connected, transport:', socket.io.engine.transport.name);
+      console.log('Socket.io connected, transport:', socket?.io.engine.transport.name);
     });
 
     socket.on('disconnect', (reason) => {
