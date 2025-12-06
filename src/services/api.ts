@@ -298,6 +298,12 @@ class ApiService {
 
   async getFeed(): Promise<any> {
     const headers = await this.getAuthHeaders();
+    
+    // Debug logging in production
+    if (import.meta.env.PROD) {
+      console.log('[API] getFeed - Headers being sent:', headers);
+      console.log('[API] getFeed - x-user-id:', headers['x-user-id'] || 'NOT SET');
+    }
 
     const response = await fetch(`${API_URL}/api/feed`, {
       method: 'GET',
