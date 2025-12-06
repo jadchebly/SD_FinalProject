@@ -59,12 +59,12 @@ jobs:
           fi
           echo "✅ VITE_BACKEND_URL_PRODUCTION is set (value masked for security)"
           echo "   Length: ${#VITE_BACKEND_URL_PRODUCTION} characters"
-          echo "   Should start with: https://"
-          # Verify it's a valid URL format
-          if [[ "$VITE_BACKEND_URL_PRODUCTION" == https://* ]]; then
-            echo "✅ URL format is correct"
+          # Verify it's a valid URL format (http:// or https://)
+          if [[ "$VITE_BACKEND_URL_PRODUCTION" == http://* ]] || [[ "$VITE_BACKEND_URL_PRODUCTION" == https://* ]]; then
+            echo "✅ URL format is correct (http:// or https://)"
           else
-            echo "⚠️  Warning: URL doesn't start with https://"
+            echo "⚠️  Warning: URL doesn't start with http:// or https://"
+            echo "   Current value starts with: ${VITE_BACKEND_URL_PRODUCTION:0:10}..."
           fi
           echo "Building with production environment..."
           # Verify the env var is available before building

@@ -24,6 +24,7 @@ app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     
+    // Allow localhost for development
     if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
       return callback(null, true);
     }
@@ -40,7 +41,14 @@ app.use(cors({
       'http://localhost:5174',
     ].filter(Boolean);
     
+    // Check exact match first
     if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // In production, also allow Azure Static Web Apps domains
+    // Azure Static Web Apps can have different subdomains (e.g., .1., .2., .3., etc.)
+    if (isProduction && origin.includes('.azurestaticapps.net')) {
       return callback(null, true);
     }
     
