@@ -28,8 +28,14 @@ app.use(cors({
       return callback(null, true);
     }
     
+    // Use production URL if in production, otherwise use development URL
+    const isProduction = process.env.NODE_ENV === 'production';
+    const frontendUrl = isProduction 
+      ? process.env.FRONTEND_URL_PRODUCTION 
+      : process.env.FRONTEND_URL;
+    
     const allowedOrigins = [
-      process.env.FRONTEND_URL,
+      frontendUrl,
       'http://localhost:5173',
       'http://localhost:5174',
     ].filter(Boolean);
