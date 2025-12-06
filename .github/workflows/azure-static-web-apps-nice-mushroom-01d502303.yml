@@ -51,6 +51,7 @@ jobs:
       - name: Build
         env:
           VITE_BACKEND_URL_PRODUCTION: ${{ secrets.VITE_BACKEND_URL_PRODUCTION }}
+          NODE_ENV: production
         run: |
           if [ -z "$VITE_BACKEND_URL_PRODUCTION" ]; then
             echo "❌ ERROR: VITE_BACKEND_URL_PRODUCTION is not set!"
@@ -66,12 +67,22 @@ jobs:
             echo "⚠️  Warning: URL doesn't start with https://"
           fi
           echo "Building with production environment..."
-          # Explicitly export the env var so it's available to the build process
+          # Verify the env var is available before building
+          echo "Checking environment variables:"
+          echo "  VITE_BACKEND_URL_PRODUCTION length: ${#VITE_BACKEND_URL_PRODUCTION}"
+          echo "  NODE_ENV: $NODE_ENV"
+          # Export to make sure it's available to all child processes
           export VITE_BACKEND_URL_PRODUCTION="$VITE_BACKEND_URL_PRODUCTION"
           export NODE_ENV=production
-          echo "Environment variables exported for build"
-          echo "Verifying env var is available..."
-          echo "Running: npm run build"
+          # Verify it's exported
+          echo "Exported variables:"
+          env | grep -E "VITE_BACKEND_URL_PRODUCTION|NODE_ENV" || echo "Warning: Variables not in environment"
+          # Create .env.production file to ensure Vite picks it up
+          echo "Creating .env.production file..."
+          echo "VITE_BACKEND_URL_PRODUCTION=$VITE_BACKEND_URL_PRODUCTION" > .env.production
+          echo "NODE_ENV=production" >> .env.production
+          echo ".env.production created"
+          # Build - the env vars should be available to vite build
           npm run build
           echo "✅ Build completed - checking if env var was used..."
           # Check if the built file contains the backend URL (without exposing it)
