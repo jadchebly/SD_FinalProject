@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
-import { supabase, supabaseAdmin } from './config/database';
+import { db, dbAdmin } from './config/database';
 import { uploadImageToS3, deleteImageFromS3 } from './services/s3Service';
 
 dotenv.config();
@@ -51,14 +51,15 @@ app.get('/health', (req, res) => {
 
 app.get('/test-db', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('users').select('count').limit(0);
+    // Test basic connection
+    const { data, error } = await db.from('users').select('id').limit(1);
 
     if (error) {
-      if (error.code === 'PGRST116' || error.message.includes('does not exist')) {
+      if (error.message && (error.message.includes('does not exist') || error.message.includes('relation'))) {
         return res.json({
           success: true,
           database: 'connected',
-          message: 'Supabase connected! (Tables may not be created yet)',
+          message: 'AWS RDS PostgreSQL connected! (Tables may not be created yet)',
         });
       }
       throw error;
@@ -67,7 +68,7 @@ app.get('/test-db', async (req, res) => {
     res.json({
       success: true,
       database: 'connected',
-      message: 'Supabase connection successful!',
+      message: 'AWS RDS PostgreSQL connection successful!',
       data,
     });
   } catch (error) {
@@ -124,7 +125,7 @@ app.post('/api/signup', async (req, res) => {
     console.log('Creating user:', { username, email });
 
     // Check if user already exists
-    const { data: existingUsers } = await supabase
+    const { data: existingUsers } = await db
       .from('users')
       .select('id, email, username')
       .or(`email.eq.${email},username.eq.${username}`);
@@ -147,7 +148,7 @@ app.post('/api/signup', async (req, res) => {
     const passwordHash = password; // TODO: Use bcrypt in production
 
     // Create user in database
-    const { data: newUser, error: createError } = await supabase
+    const { data: newUser, error: createError } = await db
       .from('users')
       .insert({
         id: userId,
@@ -206,7 +207,7 @@ app.post('/api/login', async (req, res) => {
     console.log('Login attempt for:', email);
 
     // Find user by email
-    const { data: user, error: userError } = await supabase
+    const { data: user, error: userError } = await db
       .from('users')
       .select('id, username, email, password_hash, avatar_url')
       .eq('email', email.trim().toLowerCase())
@@ -267,7 +268,7 @@ app.get('/api/me', async (req, res) => {
       return res.status(200).json({ success: true, user: null });
     }
 
-    const { data: user, error } = await supabase
+    const { data: user, error } = await db
       .from('users')
       .select('id, username, email, avatar_url')
       .eq('id', currentUserId)
@@ -309,7 +310,7 @@ app.get('/api/following', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
 
-    const { data: follows, error } = await supabase
+    const { data: follows, error } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', currentUserId);
@@ -350,7 +351,7 @@ app.get('/api/users/suggested', async (req, res) => {
     // Get list of users the current user is following (if logged in)
     let followingIds: string[] = [];
     if (currentUserId) {
-      const { data: follows } = await supabase
+      const { data: follows } = await db
         .from('follows')
         .select('following_id')
         .eq('follower_id', currentUserId);
@@ -359,7 +360,7 @@ app.get('/api/users/suggested', async (req, res) => {
     }
 
     // Fetch candidate users (limit to 100 for efficiency) and filter in JS
-    const { data: usersRaw, error } = await supabaseAdmin
+    const { data: usersRaw, error } = await dbAdmin
       .from('users')
       .select('id, username, avatar_url, email')
       .limit(100);
@@ -391,7 +392,7 @@ app.get('/api/users/:id', async (req, res) => {
     const { id } = req.params;
     const currentUserId = req.headers['x-user-id'] as string;
 
-    const { data: user, error } = await supabase
+    const { data: user, error } = await db
       .from('users')
       .select('id, username, email, avatar_url, created_at')
       .eq('id', id)
@@ -404,7 +405,7 @@ app.get('/api/users/:id', async (req, res) => {
     // Get follow status if current user is logged in
     let isFollowing = false;
     if (currentUserId && currentUserId !== id) {
-      const { data: follow } = await supabase
+      const { data: follow } = await db
         .from('follows')
         .select('follower_id')
         .eq('follower_id', currentUserId)
@@ -414,12 +415,12 @@ app.get('/api/users/:id', async (req, res) => {
     }
 
     // Get follower/following counts
-    const { count: followerCount } = await supabase
+    const { count: followerCount } = await db
       .from('follows')
       .select('*', { count: 'exact', head: true })
       .eq('following_id', id);
 
-    const { count: followingCount } = await supabase
+    const { count: followingCount } = await db
       .from('follows')
       .select('*', { count: 'exact', head: true })
       .eq('follower_id', id);
@@ -457,7 +458,7 @@ app.post('/api/follow/:userId', async (req, res) => {
     }
 
     // Check if already following
-    const { data: existing } = await supabase
+    const { data: existing } = await db
       .from('follows')
       .select('follower_id')
       .eq('follower_id', followerId)
@@ -468,7 +469,7 @@ app.post('/api/follow/:userId', async (req, res) => {
       return res.status(400).json({ error: 'Already following this user' });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('follows')
       .insert({
         follower_id: followerId,
@@ -499,7 +500,7 @@ app.delete('/api/follow/:userId', async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('follows')
       .delete()
       .eq('follower_id', followerId)
@@ -539,7 +540,7 @@ app.put('/api/users/:id/avatar', async (req, res) => {
     
     console.log(`Updating avatar for user ${id}, avatar_url length: ${normalizedAvatarUrl?.length || 0}`);
 
-    const { data: updatedUser, error } = await supabase
+    const { data: updatedUser, error } = await db
       .from('users')
       .update({ avatar_url: normalizedAvatarUrl })
       .eq('id', id)
@@ -547,7 +548,7 @@ app.put('/api/users/:id/avatar', async (req, res) => {
       .single();
 
     if (error) {
-      console.error('Supabase update error:', error);
+      console.error('Database update error:', error);
       throw error;
     }
 
@@ -582,7 +583,7 @@ app.get('/api/users/:id/followers', async (req, res) => {
     const currentUserId = req.headers['x-user-id'] as string;
 
     // Get all users who follow this user
-    const { data: follows, error: followsError } = await supabase
+    const { data: follows, error: followsError } = await db
       .from('follows')
       .select('follower_id')
       .eq('following_id', id);
@@ -598,7 +599,7 @@ app.get('/api/users/:id/followers', async (req, res) => {
     }
 
     // Get user details for followers
-    const { data: users, error: usersError } = await supabase
+    const { data: users, error: usersError } = await db
       .from('users')
       .select('id, username, email, avatar_url')
       .in('id', followerIds);
@@ -610,7 +611,7 @@ app.get('/api/users/:id/followers', async (req, res) => {
     // Get follow status for each user (if current user is logged in)
     let followingIds = new Set<string>();
     if (currentUserId) {
-      const { data: currentUserFollows } = await supabase
+      const { data: currentUserFollows } = await db
         .from('follows')
         .select('following_id')
         .eq('follower_id', currentUserId)
@@ -644,7 +645,7 @@ app.get('/api/users/:id/following', async (req, res) => {
     const currentUserId = req.headers['x-user-id'] as string;
 
     // Get all users this user follows
-    const { data: follows, error: followsError } = await supabase
+    const { data: follows, error: followsError } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', id);
@@ -660,7 +661,7 @@ app.get('/api/users/:id/following', async (req, res) => {
     }
 
     // Get user details for following
-    const { data: users, error: usersError } = await supabase
+    const { data: users, error: usersError } = await db
       .from('users')
       .select('id, username, email, avatar_url')
       .in('id', followingIds);
@@ -673,7 +674,7 @@ app.get('/api/users/:id/following', async (req, res) => {
     // But we need to check if current user follows them
     let currentUserFollowingIds = new Set<string>();
     if (currentUserId) {
-      const { data: currentUserFollows } = await supabase
+      const { data: currentUserFollows } = await db
         .from('follows')
         .select('following_id')
         .eq('follower_id', currentUserId)
@@ -710,7 +711,7 @@ app.get('/api/feed', async (req, res) => {
     }
 
     // Get list of users being followed
-    const { data: follows } = await supabase
+    const { data: follows } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', userId);
@@ -720,7 +721,7 @@ app.get('/api/feed', async (req, res) => {
     const userIds = [...followingIds, userId];
 
     // Get posts from followed users + self
-    const { data: posts, error: postsError } = await supabase
+    const { data: posts, error: postsError } = await db
       .from('posts')
       .select(`
         *,
@@ -740,13 +741,13 @@ app.get('/api/feed', async (req, res) => {
 
     // Get likes for each post
     const postIds = posts?.map(p => p.id) || [];
-    const { data: likes } = await supabase
+    const { data: likes } = await db
       .from('likes')
       .select('user_id, post_id')
       .in('post_id', postIds);
 
     // Get comments count for each post
-    const { data: comments } = await supabase
+    const { data: comments } = await db
       .from('comments')
       .select('post_id')
       .in('post_id', postIds);
@@ -791,7 +792,7 @@ app.post('/api/posts/:id/like', async (req, res) => {
     }
 
     // Check if already liked
-    const { data: existing } = await supabase
+    const { data: existing } = await db
       .from('likes')
       .select('user_id')
       .eq('user_id', userId)
@@ -802,7 +803,7 @@ app.post('/api/posts/:id/like', async (req, res) => {
       return res.json({ success: true, message: 'Already liked' });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('likes')
       .insert({
         user_id: userId,
@@ -833,7 +834,7 @@ app.delete('/api/posts/:id/like', async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('likes')
       .delete()
       .eq('user_id', userId)
@@ -858,7 +859,7 @@ app.get('/api/posts/:id/comments', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data: comments, error } = await supabase
+    const { data: comments, error } = await db
       .from('comments')
       .select(`
         *,
@@ -911,7 +912,7 @@ app.post('/api/posts/:id/comments', async (req, res) => {
       return res.status(400).json({ error: 'Comment text is required' });
     }
 
-    const { data: comment, error } = await supabase
+    const { data: comment, error } = await db
       .from('comments')
       .insert({
         post_id: id,
@@ -961,7 +962,7 @@ app.get('/api/users/suggested', async (req, res) => {
     }
 
     // Get list of users being followed
-    const { data: follows } = await supabase
+    const { data: follows } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', currentUserId);
@@ -971,7 +972,7 @@ app.get('/api/users/suggested', async (req, res) => {
     const excludeIds = [...followingIds, currentUserId];
 
     // Get all users
-    const { data: allUsers, error } = await supabase
+    const { data: allUsers, error } = await db
       .from('users')
       .select('id, username, email, avatar_url');
 
@@ -1014,7 +1015,7 @@ app.get('/api/users/search/:query', async (req, res) => {
       return res.json({ success: true, users: [] });
     }
 
-    const { data: users, error } = await supabase
+    const { data: users, error } = await db
       .from('users')
       .select('id, username, avatar_url')
       .ilike('username', `%${query}%`)
@@ -1026,7 +1027,7 @@ app.get('/api/users/search/:query', async (req, res) => {
 
     // Get follow status for each user
     const userIds = users?.map(u => u.id) || [];
-    const { data: follows } = await supabase
+    const { data: follows } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', currentUserId || '')
@@ -1060,7 +1061,7 @@ app.get('/api/users/suggested', async (req, res) => {
     // Get list of users the current user is following (if logged in)
     let followingIds: string[] = [];
     if (currentUserId) {
-      const { data: follows } = await supabase
+      const { data: follows } = await db
         .from('follows')
         .select('following_id')
         .eq('follower_id', currentUserId);
@@ -1069,7 +1070,7 @@ app.get('/api/users/suggested', async (req, res) => {
     }
 
     // Fetch candidate users (limit to 100 for efficiency) and filter in JS
-    const { data: usersRaw, error } = await supabaseAdmin
+    const { data: usersRaw, error } = await dbAdmin
       .from('users')
       .select('id, username, avatar_url, email')
       .limit(100);
@@ -1102,7 +1103,7 @@ app.get('/api/posts', async (req, res) => {
     const userId = req.query.user_id as string;
     const currentUserId = req.headers['x-user-id'] as string;
 
-    let query = supabaseAdmin
+    let query = dbAdmin
       .from('posts')
       .select(`
         *,
@@ -1134,13 +1135,13 @@ app.get('/api/posts', async (req, res) => {
 
     // Get likes for each post (using admin client to bypass RLS)
     const postIds = posts.map(p => p.id);
-    const { data: likes } = await supabaseAdmin
+    const { data: likes } = await dbAdmin
       .from('likes')
       .select('user_id, post_id')
       .in('post_id', postIds);
 
     // Get comments count for each post (using admin client to bypass RLS)
-    const { data: comments } = await supabaseAdmin
+    const { data: comments } = await dbAdmin
       .from('comments')
       .select('post_id')
       .in('post_id', postIds);
@@ -1202,7 +1203,7 @@ app.post('/api/posts', async (req, res) => {
 
     let userId = user_id;
     
-    const { data: existingUser, error: userCheckError } = await supabase
+    const { data: existingUser, error: userCheckError } = await db
       .from('users')
       .select('id')
       .eq('id', user_id)
@@ -1211,7 +1212,7 @@ app.post('/api/posts', async (req, res) => {
     if (!existingUser && username) {
       console.log('User not found, creating user entry...');
       try {
-        const { data: newUser, error: createUserError } = await supabase
+        const { data: newUser, error: createUserError } = await db
           .from('users')
           .insert({
             id: user_id,
@@ -1224,7 +1225,7 @@ app.post('/api/posts', async (req, res) => {
 
         if (createUserError) {
           console.error('Error creating user:', createUserError);
-          const { data: userByUsername } = await supabase
+          const { data: userByUsername } = await db
             .from('users')
             .select('id')
             .eq('username', username)
@@ -1270,7 +1271,7 @@ app.post('/api/posts', async (req, res) => {
 
     console.log('Inserting post with data:', { ...insertData, image_url: insertData.image_url ? 'present' : 'null', video_url: insertData.video_url ? 'present' : 'null' });
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('posts')
       .insert(insertData)
       .select()
@@ -1356,7 +1357,7 @@ app.put('/api/posts/:id', async (req, res) => {
       return res.status(400).json({ error: 'Content cannot be empty' });
     }
 
-    const { data: post, error: fetchError } = await supabaseAdmin
+    const { data: post, error: fetchError } = await dbAdmin
       .from('posts')
       .select('id, user_id')
       .eq('id', id)
@@ -1378,7 +1379,7 @@ app.put('/api/posts/:id', async (req, res) => {
     }
 
     // Update the post (using admin client to bypass RLS)
-    const { data: updatedPosts, error: updateError } = await supabaseAdmin
+    const { data: updatedPosts, error: updateError } = await dbAdmin
       .from('posts')
       .update({
         title: trimmedTitle,
@@ -1435,12 +1436,11 @@ app.delete('/api/posts/:id', async (req, res) => {
     }
 
     console.log('🗑️ Attempting to delete post:', id);
-    console.log('🗑️ Using admin client (bypasses RLS):', !!supabaseAdmin);
-    console.log('🗑️ Service role key present:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+    console.log('🗑️ Using admin client:', !!dbAdmin);
 
     // First, get the post to check ownership and get image URL (using admin client to bypass RLS)
     console.log('🗑️ Fetching post from database using admin client...');
-    const { data: post, error: fetchError } = await supabaseAdmin
+    const { data: post, error: fetchError } = await dbAdmin
       .from('posts')
       .select('id, user_id, image_url, title')
       .eq('id', id)
@@ -1491,7 +1491,7 @@ app.delete('/api/posts/:id', async (req, res) => {
     // - All comments on this post (via ON DELETE CASCADE)
     // - All likes on this post (via ON DELETE CASCADE)
     console.log('🗑️ Deleting post from database using admin client...');
-    const { data: deletedData, error: deleteError } = await supabaseAdmin
+    const { data: deletedData, error: deleteError } = await dbAdmin
       .from('posts')
       .delete()
       .eq('id', id)
@@ -1509,12 +1509,12 @@ app.delete('/api/posts/:id', async (req, res) => {
     console.log('✅ Deleted rows:', deletedData?.length || 0);
 
     // Verify cascading deletes worked (optional - for logging)
-    const { count: remainingComments } = await supabaseAdmin
+    const { count: remainingComments } = await dbAdmin
       .from('comments')
       .select('*', { count: 'exact', head: true })
       .eq('post_id', id);
 
-    const { count: remainingLikes } = await supabaseAdmin
+    const { count: remainingLikes } = await dbAdmin
       .from('likes')
       .select('*', { count: 'exact', head: true })
       .eq('post_id', id);
@@ -1531,7 +1531,7 @@ app.delete('/api/posts/:id', async (req, res) => {
     console.log('✅ Verification: Checking if post still exists...');
 
     // Double-check that post is actually deleted (using admin client)
-    const { data: verifyPost } = await supabaseAdmin
+    const { data: verifyPost } = await dbAdmin
       .from('posts')
       .select('id')
       .eq('id', id)
