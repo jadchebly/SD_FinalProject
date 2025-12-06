@@ -8,6 +8,12 @@ on:
     types: [opened, synchronize, reopened, closed]
     branches:
       - main
+  workflow_run:
+    workflows: ["Build and deploy Node.js app to Azure Web App - IEstagram"]
+    types:
+      - completed
+    branches:
+      - main
 
 jobs:
   build_and_deploy_job:
@@ -24,14 +30,58 @@ jobs:
         with:
           node-version: '20.x'
           cache: 'npm'
+      - name: Wait for backend to be ready
+        run: |
+          BACKEND_URL="${{ secrets.VITE_BACKEND_URL_PRODUCTION }}"
+          echo "Waiting for backend to be ready at: $BACKEND_URL"
+          max_attempts=30
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f -s "$BACKEND_URL/health" > /dev/null 2>&1; then
+              echo "Backend is ready!"
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts: Backend not ready yet, waiting 10 seconds..."
+            sleep 10
+          done
+          echo "Warning: Backend health check timed out, but continuing with build..."
       - name: Install dependencies
         run: npm ci
       - name: Build
         env:
           VITE_BACKEND_URL_PRODUCTION: ${{ secrets.VITE_BACKEND_URL_PRODUCTION }}
         run: |
-          echo "Building with VITE_BACKEND_URL_PRODUCTION: $VITE_BACKEND_URL_PRODUCTION"
+          if [ -z "$VITE_BACKEND_URL_PRODUCTION" ]; then
+            echo "❌ ERROR: VITE_BACKEND_URL_PRODUCTION is not set!"
+            exit 1
+          fi
+          echo "✅ VITE_BACKEND_URL_PRODUCTION is set (value masked for security)"
+          echo "   Length: ${#VITE_BACKEND_URL_PRODUCTION} characters"
+          echo "   Should start with: https://"
+          # Verify it's a valid URL format
+          if [[ "$VITE_BACKEND_URL_PRODUCTION" == https://* ]]; then
+            echo "✅ URL format is correct"
+          else
+            echo "⚠️  Warning: URL doesn't start with https://"
+          fi
+          echo "Building with production environment..."
+          # Explicitly export the env var so it's available to the build process
+          export VITE_BACKEND_URL_PRODUCTION="$VITE_BACKEND_URL_PRODUCTION"
+          export NODE_ENV=production
+          echo "Environment variables exported for build"
           npm run build
+          echo "✅ Build completed - checking if env var was used..."
+          # Check if the built file contains the backend URL (without exposing it)
+          if grep -r "iestagram.*azurewebsites" dist/ > /dev/null 2>&1; then
+            echo "✅ Backend URL found in build output"
+          elif grep -r "localhost:3000" dist/ > /dev/null 2>&1; then
+            echo "❌ ERROR: localhost:3000 found in build - env var not used!"
+            echo "This means VITE_BACKEND_URL_PRODUCTION was not available during build"
+            exit 1
+          else
+            echo "⚠️  Warning: Could not verify backend URL in build output"
+          fi
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
