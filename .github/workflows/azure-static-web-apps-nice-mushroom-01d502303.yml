@@ -70,6 +70,8 @@ jobs:
           export VITE_BACKEND_URL_PRODUCTION="$VITE_BACKEND_URL_PRODUCTION"
           export NODE_ENV=production
           echo "Environment variables exported for build"
+          echo "Verifying env var is available..."
+          echo "Running: npm run build"
           npm run build
           echo "✅ Build completed - checking if env var was used..."
           # Check if the built file contains the backend URL (without exposing it)
