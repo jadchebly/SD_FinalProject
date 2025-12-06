@@ -51,14 +51,15 @@ app.get('/health', (req, res) => {
 
 app.get('/test-db', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('users').select('count').limit(0);
+    // Test basic connection
+    const { data, error } = await supabase.from('users').select('id').limit(1);
 
     if (error) {
-      if (error.code === 'PGRST116' || error.message.includes('does not exist')) {
+      if (error.message && (error.message.includes('does not exist') || error.message.includes('relation'))) {
         return res.json({
           success: true,
           database: 'connected',
-          message: 'Supabase connected! (Tables may not be created yet)',
+          message: 'AWS RDS PostgreSQL connected! (Tables may not be created yet)',
         });
       }
       throw error;
@@ -67,7 +68,7 @@ app.get('/test-db', async (req, res) => {
     res.json({
       success: true,
       database: 'connected',
-      message: 'Supabase connection successful!',
+      message: 'AWS RDS PostgreSQL connection successful!',
       data,
     });
   } catch (error) {
