@@ -24,6 +24,7 @@ export default function Profile() {
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const commentInputRef = useRef<HTMLInputElement | null>(null);
+  const [timestampRefresh, setTimestampRefresh] = useState(0); // Force re-render for timestamp updates
   const [showFollowersModal, setShowFollowersModal] = useState(false);
 
   // Initialize socket connection on mount
@@ -199,6 +200,20 @@ export default function Profile() {
 
     loadProfile();
   }, [profileId]);
+
+  // Periodically refresh comment timestamps while viewing a post
+  useEffect(() => {
+    if (!selectedPost || !selectedPost.comments || selectedPost.comments.length === 0) {
+      return;
+    }
+
+    // Update timestamps every 30 seconds
+    const interval = setInterval(() => {
+      setTimestampRefresh(prev => prev + 1);
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, [selectedPost]);
 
   const getTimeAgo = (createdAt: string | Date | undefined): string => {
     if (!createdAt) return 'just now';
@@ -909,7 +924,9 @@ export default function Profile() {
                       <div className="comment-content">
                         <div className="comment-header">
                           <span className="comment-username">{c.user}</span>
-                          <span className="comment-time">{c.timeAgo || getTimeAgo(c.createdAt)}</span>
+                          <span className="comment-time" key={`${c.id}-${timestampRefresh}`}>
+                            {getTimeAgo(c.createdAt)}
+                          </span>
                         </div>
                         <p className="comment-text">{c.text}</p>
                       </div>

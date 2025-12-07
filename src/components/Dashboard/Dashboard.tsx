@@ -26,6 +26,7 @@ export default function Dashboard() {
   const [showSuggestedUsers, setShowSuggestedUsers] = useState(false);
   const [shouldFocusComment, setShouldFocusComment] = useState(false);
   const commentInputRef = useRef<HTMLInputElement>(null);
+  const [timestampRefresh, setTimestampRefresh] = useState(0); // Force re-render for timestamp updates
 
   // Initialize socket connection on mount and join rooms for feed updates
   useEffect(() => {
@@ -798,6 +799,20 @@ export default function Dashboard() {
     }
   }, [selectedPost, shouldFocusComment]);
 
+  // Periodically refresh comment timestamps while viewing a post
+  useEffect(() => {
+    if (!selectedPost || !selectedPost.comments || selectedPost.comments.length === 0) {
+      return;
+    }
+
+    // Update timestamps every 30 seconds
+    const interval = setInterval(() => {
+      setTimestampRefresh(prev => prev + 1);
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, [selectedPost]);
+
   return (
     <div className="dashboard-container">
       <Navbar />
@@ -982,7 +997,9 @@ export default function Dashboard() {
                           <div className="comment-content">
                             <div className="comment-header">
                               <span className="comment-username">{comment.user}</span>
-                              <span className="comment-time">{comment.timeAgo || getTimeAgo(comment.createdAt)}</span>
+                              <span className="comment-time" key={`${comment.id}-${timestampRefresh}`}>
+                                {getTimeAgo(comment.createdAt)}
+                              </span>
                             </div>
                             <p className="comment-text">{comment.text}</p>
                           </div>
