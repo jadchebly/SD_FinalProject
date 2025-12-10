@@ -10,7 +10,7 @@ import { BrowserRouter } from 'react-router-dom';
 import CreatePost from '../CreatePost';
 import { AuthProvider } from '../../contexts/AuthContext';
 import * as api from '../../services/api';
-import { setupCanvasMocks, resetCanvasMocks, type CanvasMocks } from '../../test/utils/canvasMock';
+import { setupCanvasMocks, resetCanvasMocks } from '../../test/utils/canvasMock';
 
 // Mock the API
 vi.mock('../../services/api', () => ({
@@ -35,11 +35,11 @@ vi.mock('react-router-dom', async () => {
 });
 
 // Mock window.scrollTo
-global.window.scrollTo = vi.fn();
+window.scrollTo = vi.fn();
 
 // Mock URL.createObjectURL and URL.revokeObjectURL
-global.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
-global.URL.revokeObjectURL = vi.fn();
+URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+URL.revokeObjectURL = vi.fn();
 
 // Mock MediaStream and MediaDevices for camera functionality
 const mockMediaStream = {
@@ -51,7 +51,7 @@ const mockMediaStream = {
 
 const mockGetUserMedia = vi.fn().mockResolvedValue(mockMediaStream);
 
-Object.defineProperty(global.navigator, 'mediaDevices', {
+Object.defineProperty(navigator, 'mediaDevices', {
   writable: true,
   value: {
     getUserMedia: mockGetUserMedia,
@@ -116,17 +116,17 @@ function MockMediaRecorderConstructor(this: any, stream: MediaStream, options?: 
     return new (MockMediaRecorderConstructor as any)(stream, options);
   }
   
-  this.state = 'inactive';
-  this.start = vi.fn();
-  this.stop = vi.fn(() => {
+  (this as any).state = 'inactive';
+  (this as any).start = vi.fn();
+  (this as any).stop = vi.fn(() => {
     // When stop is called, trigger onstop handler if it exists
-    if (this.onstop && typeof this.onstop === 'function') {
-      this.onstop();
+    if ((this as any).onstop && typeof (this as any).onstop === 'function') {
+      (this as any).onstop();
     }
-    this.state = 'inactive';
+    (this as any).state = 'inactive';
   });
-  this.ondataavailable = null;
-  this.onstop = null;
+  (this as any).ondataavailable = null;
+  (this as any).onstop = null;
   
   lastMediaRecorderInstance = this; // Track the instance
 }
@@ -140,15 +140,8 @@ MockMediaRecorderConstructor.isTypeSupported = vi.fn((mimeType: string) => {
 const MockMediaRecorder = vi.fn(MockMediaRecorderConstructor) as any;
 MockMediaRecorder.isTypeSupported = MockMediaRecorderConstructor.isTypeSupported;
 
-// Assign to global
-global.MediaRecorder = MockMediaRecorder;
-
-// Add static method
-MockMediaRecorder.isTypeSupported = vi.fn((mimeType: string) => {
-  return mimeType === 'video/webm;codecs=vp9' || mimeType === 'video/webm;codecs=vp8';
-});
-
-global.MediaRecorder = MockMediaRecorder;
+// Assign to window
+(window as any).MediaRecorder = MockMediaRecorder;
 
 // Mock DragEvent for jsdom (not natively supported)
 class MockDragEvent extends Event {
@@ -160,7 +153,7 @@ class MockDragEvent extends Event {
   }
 }
 
-global.DragEvent = MockDragEvent as any;
+(window as any).DragEvent = MockDragEvent;
 
 const mockUser = {
   id: 'user-123',
@@ -201,7 +194,7 @@ describe('CreatePost Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
-    vi.mocked(global.window.scrollTo).mockClear();
+    vi.mocked(window.scrollTo).mockClear();
     
     // Reset camera mocks
     mockGetUserMedia.mockClear();
@@ -214,7 +207,7 @@ describe('CreatePost Component', () => {
     // Reset return values
     canvasMocks.toDataURL.mockReturnValue('data:image/png;base64,test');
     if (canvasMocks.toBlob) {
-      canvasMocks.toBlob.mockImplementation((callback: (blob: Blob | null) => void) => {
+      canvasMocks.toBlob.mockImplementation((callback: any) => {
         const blob = new Blob(['test'], { type: 'image/jpeg' });
         callback(blob);
       });
@@ -223,8 +216,8 @@ describe('CreatePost Component', () => {
     mockVideoElement.srcObject = null;
     
     // Reset Image mock
-    if (global.Image) {
-      (global.Image as any).mockClear?.();
+    if ((window as any).Image) {
+      ((window as any).Image as any).mockClear?.();
     }
   });
 
@@ -339,7 +332,7 @@ describe('CreatePost Component', () => {
         // FileReader.onload -> compressImage is async, so we wait a bit
         await waitFor(() => {
           // Check if image preview appears (indicates image was set)
-          const imagePreview = document.querySelector('.preview-image');
+          document.querySelector('.preview-image');
           // If it appears, great. If not, we'll still test the submission
         }, { timeout: 2000 }).catch(() => {
           // FileReader/compression might not work in test env, continue anyway
@@ -426,7 +419,7 @@ describe('CreatePost Component', () => {
         // The image state is set asynchronously via FileReader.onload -> compressImage
         await waitFor(() => {
           // Check if image preview appears (indicates image state was set)
-          const imagePreview = document.querySelector('.preview-image');
+          document.querySelector('.preview-image');
           // If preview doesn't appear, that's okay - we'll still test the upload logic
           // The important thing is that imageFile is set, which it should be
         }, { timeout: 2000 }).catch(() => {
@@ -632,7 +625,7 @@ describe('CreatePost Component', () => {
         });
 
         // Verify scrollTo was called
-        expect(global.window.scrollTo).toHaveBeenCalledWith({
+          expect(window.scrollTo).toHaveBeenCalledWith({
           top: 0,
           behavior: 'smooth',
         });
@@ -702,7 +695,7 @@ describe('CreatePost Component', () => {
 
         // Mock FileReader to return a data URL
         const originalDataUrl = 'data:image/jpeg;base64,large-image-data';
-        const readAsDataURLSpy = vi.fn(function(this: any, file: File) {
+        const readAsDataURLSpy = vi.fn(function(this: any, _file: File) {
           setTimeout(() => {
             this.result = originalDataUrl;
             if (this.onload) {
@@ -711,7 +704,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;
@@ -755,7 +748,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;
@@ -816,7 +809,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;
@@ -901,7 +894,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;
@@ -935,7 +928,7 @@ describe('CreatePost Component', () => {
 
         // Mock window.alert
         const mockAlert = vi.fn();
-        global.window.alert = mockAlert;
+        window.alert = mockAlert;
 
         await renderCreatePost();
 
@@ -962,7 +955,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;
@@ -1009,7 +1002,7 @@ describe('CreatePost Component', () => {
         vi.mocked(api.default.uploadImage).mockRejectedValue(uploadError);
 
         const mockAlert = vi.fn();
-        global.window.alert = mockAlert;
+        window.alert = mockAlert;
 
         await renderCreatePost();
 
@@ -1033,7 +1026,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;
@@ -1067,7 +1060,7 @@ describe('CreatePost Component', () => {
         vi.mocked(api.default.uploadImage).mockRejectedValue('String error');
 
         const mockAlert = vi.fn();
-        global.window.alert = mockAlert;
+        window.alert = mockAlert;
 
         await renderCreatePost();
 
@@ -1091,7 +1084,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;
@@ -1188,7 +1181,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;
@@ -1245,7 +1238,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;
@@ -1284,7 +1277,7 @@ describe('CreatePost Component', () => {
 
         // Mock FileReader
         const mockDataUrl = 'data:image/jpeg;base64,test';
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = vi.fn(function(this: any) {
             setTimeout(() => {
               this.result = mockDataUrl;
@@ -1310,7 +1303,7 @@ describe('CreatePost Component', () => {
         // Type should be set to 'photo' after image upload completes
         // If compression doesn't work in test env, type might not change automatically
         // but we verify the file was processed
-        const currentType = typeSelect.value;
+        const currentType = (typeSelect as HTMLSelectElement).value;
         // Type should be 'photo' if compression worked, or 'blurb' if it didn't
         expect(['blurb', 'photo']).toContain(currentType);
       });
@@ -1375,7 +1368,7 @@ describe('CreatePost Component', () => {
 
         // Mock FileReader
         const mockDataUrl = 'data:image/jpeg;base64,test';
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = vi.fn(function(this: any) {
             setTimeout(() => {
               this.result = mockDataUrl;
@@ -1441,7 +1434,7 @@ describe('CreatePost Component', () => {
 
         // Mock FileReader
         const mockDataUrl = 'data:image/jpeg;base64,test';
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = vi.fn(function(this: any) {
             setTimeout(() => {
               this.result = mockDataUrl;
@@ -1507,7 +1500,7 @@ describe('CreatePost Component', () => {
 
         // Mock FileReader
         const mockDataUrl = 'data:image/jpeg;base64,test';
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = vi.fn(function(this: any) {
             setTimeout(() => {
               this.result = mockDataUrl;
@@ -1555,7 +1548,7 @@ describe('CreatePost Component', () => {
   describe('E. Camera functionality', () => {
     beforeEach(() => {
       // Mock Image for compression
-      global.Image = class {
+      (window as any).Image = class {
         onload: (() => void) | null = null;
         onerror: (() => void) | null = null;
         src = '';
@@ -2178,7 +2171,7 @@ describe('CreatePost Component', () => {
         // The stop() method should trigger onstop automatically, which creates the blob
         await waitFor(() => {
           expect(mrInstance.stop).toHaveBeenCalled();
-          expect(global.URL.createObjectURL).toHaveBeenCalled();
+          expect(URL.createObjectURL).toHaveBeenCalled();
         }, { timeout: 3000 });
       });
 
@@ -2421,7 +2414,7 @@ describe('CreatePost Component', () => {
   describe('G. File upload and drag & drop', () => {
     beforeEach(() => {
       // Mock FileReader
-      global.FileReader = class {
+      (window as any).FileReader = class {
         readAsDataURL = vi.fn(function(this: any) {
           setTimeout(() => {
             this.result = 'data:image/jpeg;base64,test';
@@ -2436,7 +2429,7 @@ describe('CreatePost Component', () => {
       } as any;
 
       // Mock Image for compression - automatically trigger onload when src is set
-      global.Image = class {
+      (window as any).Image = class {
         private _src = '';
         onload: (() => void) | null = null;
         onerror: (() => void) | null = null;
@@ -2480,7 +2473,7 @@ describe('CreatePost Component', () => {
 
         // Wait for FileReader to process
         await waitFor(() => {
-          expect(global.FileReader).toBeDefined();
+          expect((window as any).FileReader).toBeDefined();
         }, { timeout: 3000 });
 
         // Wait for image preview to appear (after compression)
@@ -2493,8 +2486,6 @@ describe('CreatePost Component', () => {
       });
 
       it('should set type to photo when image file is uploaded', { timeout: 10000 }, async () => {
-        const user = userEvent.setup();
-        
         await renderCreatePost();
 
         const typeSelect = screen.getByRole('combobox');
@@ -2505,6 +2496,7 @@ describe('CreatePost Component', () => {
         const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
         
         if (fileInput) {
+          const user = userEvent.setup();
           await user.upload(fileInput, file);
           
           // Wait for FileReader and image processing to complete
@@ -2513,7 +2505,7 @@ describe('CreatePost Component', () => {
           // Manually trigger FileReader onload if needed
           const fileReaderInstance = new FileReader();
           if (fileReaderInstance.onload) {
-            fileReaderInstance.onload();
+            fileReaderInstance.onload({} as ProgressEvent<FileReader>);
           }
           
           // Wait for Image onload
@@ -2527,7 +2519,6 @@ describe('CreatePost Component', () => {
       });
 
       it('should show alert for non-image files', async () => {
-        const user = userEvent.setup();
         const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
         
         await renderCreatePost();
@@ -2559,8 +2550,6 @@ describe('CreatePost Component', () => {
 
     describe('✅ Drag and drop', () => {
       it('should set dragActive to true on dragenter', async () => {
-        const user = userEvent.setup();
-        
         await renderCreatePost();
 
         // Find drop zone
@@ -2675,7 +2664,7 @@ describe('CreatePost Component', () => {
 
         // Wait for file processing
         await waitFor(() => {
-          expect(global.FileReader).toBeDefined();
+          expect((window as any).FileReader).toBeDefined();
         }, { timeout: 3000 });
 
         // Wait for drag active to be cleared
@@ -2695,8 +2684,8 @@ describe('CreatePost Component', () => {
           bubbles: true,
           cancelable: true,
         });
-        const preventDefaultSpy = vi.spyOn(dragOverEvent, 'preventDefault');
-        const stopPropagationSpy = vi.spyOn(dragOverEvent, 'stopPropagation');
+        vi.spyOn(dragOverEvent, 'preventDefault');
+        vi.spyOn(dragOverEvent, 'stopPropagation');
 
         Object.defineProperty(dragOverEvent, 'dataTransfer', {
           value: {
@@ -2727,8 +2716,8 @@ describe('CreatePost Component', () => {
           bubbles: true,
           cancelable: true,
         });
-        const preventDefaultSpy = vi.spyOn(dropEvent, 'preventDefault');
-        const stopPropagationSpy = vi.spyOn(dropEvent, 'stopPropagation');
+        vi.spyOn(dropEvent, 'preventDefault');
+        vi.spyOn(dropEvent, 'stopPropagation');
 
         Object.defineProperty(dropEvent, 'dataTransfer', {
           value: {
@@ -2740,7 +2729,7 @@ describe('CreatePost Component', () => {
 
         // Wait for processing
         await waitFor(() => {
-          expect(global.FileReader).toBeDefined();
+          expect((window as any).FileReader).toBeDefined();
         }, { timeout: 3000 });
       });
 
@@ -2786,7 +2775,7 @@ describe('CreatePost Component', () => {
         // Should not show alert for valid image file
         // (We can't easily test the absence of alert, but we can verify file was processed)
         await waitFor(() => {
-          expect(global.FileReader).toBeDefined();
+          expect((window as any).FileReader).toBeDefined();
         }, { timeout: 3000 });
       });
 
@@ -2803,7 +2792,7 @@ describe('CreatePost Component', () => {
         }
 
         await waitFor(() => {
-          expect(global.FileReader).toBeDefined();
+          expect((window as any).FileReader).toBeDefined();
         }, { timeout: 3000 });
       });
 
@@ -3041,7 +3030,7 @@ describe('CreatePost Component', () => {
           }, 10);
         });
 
-        global.FileReader = class {
+        (window as any).FileReader = class {
           readAsDataURL = readAsDataURLSpy;
           result = '';
           onload: (() => void) | null = null;

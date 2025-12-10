@@ -273,10 +273,6 @@ describe('AuthContext - Login Function', () => {
         expect(api.default.getMe).toHaveBeenCalled();
       });
 
-      // Get initial state
-      const initialUserElement = screen.getByTestId('user');
-      const initialUserData = initialUserElement.textContent;
-
       // Click login button
       const loginBtn = screen.getByTestId('login-btn');
       loginBtn.click();
@@ -288,7 +284,6 @@ describe('AuthContext - Login Function', () => {
 
       // Verify user state did not change
       await waitFor(() => {
-        const userElement = screen.getByTestId('user');
         // State should remain the same (or be cleared by getMe failure)
         expect(api.default.login).toHaveBeenCalled();
       });
@@ -939,7 +934,7 @@ describe('AuthContext - Login Function', () => {
         const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
         // Mock error without message property
-        const errorWithoutMessage = { code: 'DUPLICATE' } as Error;
+        const errorWithoutMessage = Object.assign(new Error(), { code: 'DUPLICATE' });
         vi.mocked(api.default.signup).mockRejectedValue(errorWithoutMessage);
 
         render(

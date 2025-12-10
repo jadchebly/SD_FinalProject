@@ -10,7 +10,7 @@ import { BrowserRouter } from 'react-router-dom';
 import Profile from '../Profile';
 import { AuthProvider } from '../../contexts/AuthContext';
 import * as api from '../../services/api';
-import { setupCanvasMocks, resetCanvasMocks, type CanvasMocks } from '../../test/utils/canvasMock';
+import { setupCanvasMocks, resetCanvasMocks } from '../../test/utils/canvasMock';
 
 // Mock socket.io-client
 vi.mock('socket.io-client', () => {
@@ -81,7 +81,7 @@ vi.mock('../../services/api', () => ({
 }));
 
 // Mock window.scrollTo
-global.window.scrollTo = vi.fn();
+window.scrollTo = vi.fn();
 
 const mockUser = {
   id: 'user-123',
@@ -131,7 +131,7 @@ const mockFileReaderResult = 'data:image/jpeg;base64,mocked-file-data';
 let lastFileReaderInstance: any = null;
 
 // Create a spy for readAsDataURL that we can track
-const fileReaderReadAsDataURLSpy = vi.fn(function(this: any, file: File) {
+const fileReaderReadAsDataURLSpy = vi.fn(function(this: any, _file: File) {
   setTimeout(() => {
     this.result = mockFileReaderResult;
     if (this.onload) {
@@ -140,7 +140,7 @@ const fileReaderReadAsDataURLSpy = vi.fn(function(this: any, file: File) {
   }, 100);
 });
 
-global.FileReader = class {
+(window as any).FileReader = class {
   readAsDataURL = fileReaderReadAsDataURLSpy;
   onload = null as (() => void) | null;
   onerror = null as (() => void) | null;
@@ -735,7 +735,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
     beforeEach(() => {
       vi.clearAllMocks();
       vi.mocked(api.default.updatePost).mockResolvedValue({ success: true });
-      global.alert = vi.fn();
+      window.alert = vi.fn();
     });
 
     describe('✅ Open edit modal', () => {
@@ -1124,7 +1124,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         await user.click(saveButton);
 
         // Verify alert was shown
-        expect(global.alert).toHaveBeenCalledWith('Title and content cannot be empty');
+        expect(window.alert).toHaveBeenCalledWith('Title and content cannot be empty');
 
         // Verify API was not called
         expect(api.default.updatePost).not.toHaveBeenCalled();
@@ -1173,7 +1173,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         await user.click(saveButton);
 
         // Verify alert was shown
-        expect(global.alert).toHaveBeenCalledWith('Title and content cannot be empty');
+        expect(window.alert).toHaveBeenCalledWith('Title and content cannot be empty');
 
         // Verify API was not called
         expect(api.default.updatePost).not.toHaveBeenCalled();
@@ -1245,7 +1245,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         }, { timeout: 3000 });
 
         // Verify alert was shown
-        expect(global.alert).toHaveBeenCalledWith('Failed to update post: Update failed');
+        expect(window.alert).toHaveBeenCalledWith('Failed to update post: Update failed');
 
         // Verify post was not updated
         expect(screen.getByText('Original Title')).toBeInTheDocument();
@@ -1259,7 +1259,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
     beforeEach(() => {
       vi.clearAllMocks();
       vi.mocked(api.default.deletePost).mockResolvedValue({ success: true });
-      global.alert = vi.fn();
+      window.alert = vi.fn();
     });
 
     describe('✅ Delete confirmation modal', () => {
@@ -1726,7 +1726,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         }, { timeout: 3000 });
 
         // Verify error alert was shown
-        expect(global.alert).toHaveBeenCalledWith('Failed to delete post: Delete failed');
+        expect(window.alert).toHaveBeenCalledWith('Failed to delete post: Delete failed');
 
         // Verify post is still in display (not deleted)
         expect(screen.getByText('Test Post')).toBeInTheDocument();
@@ -1805,7 +1805,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         }, { timeout: 3000 });
 
         // Verify error alert with fallback message
-        expect(global.alert).toHaveBeenCalledWith('Failed to delete post: Unknown error');
+        expect(window.alert).toHaveBeenCalledWith('Failed to delete post: Unknown error');
 
         consoleErrorSpy.mockRestore();
       });
@@ -2365,7 +2365,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         success: true,
         comments: [],
       });
-      global.alert = vi.fn();
+      window.alert = vi.fn();
     });
 
     describe('✅ Like/Unlike functionality', () => {
@@ -2432,7 +2432,6 @@ describe('Profile Component - D. Followers/Following modals', () => {
       });
 
       it('should not call API when user is not logged in', async () => {
-        const user = userEvent.setup();
         const mockPosts = [
           {
             id: 'post-1',
@@ -2522,7 +2521,6 @@ describe('Profile Component - D. Followers/Following modals', () => {
       });
 
       it('should stop event propagation when like button is clicked', async () => {
-        const user = userEvent.setup();
         const mockPosts = [
           {
             id: 'post-1',
@@ -2551,7 +2549,6 @@ describe('Profile Component - D. Followers/Following modals', () => {
 
     describe('✅ Comment functionality', () => {
       it('should call addComment API when comment is submitted', async () => {
-        const user = userEvent.setup();
         const mockPosts = [
           {
             id: 'post-1',
@@ -2581,7 +2578,6 @@ describe('Profile Component - D. Followers/Following modals', () => {
       });
 
       it('should clear comment input after submission', async () => {
-        const user = userEvent.setup();
         const mockPosts = [
           {
             id: 'post-1',
@@ -2607,7 +2603,6 @@ describe('Profile Component - D. Followers/Following modals', () => {
       });
 
       it('should not submit comment when input is empty', async () => {
-        const user = userEvent.setup();
         const mockPosts = [
           {
             id: 'post-1',
@@ -2634,7 +2629,6 @@ describe('Profile Component - D. Followers/Following modals', () => {
       });
 
       it('should not submit comment when user is not authenticated', async () => {
-        const user = userEvent.setup();
         const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         
         const mockPosts = [
@@ -2664,8 +2658,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
       });
 
       it('should handle addComment API error gracefully', async () => {
-        const user = userEvent.setup();
-        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
         
         const mockPosts = [
           {
@@ -2706,7 +2699,6 @@ describe('Profile Component - D. Followers/Following modals', () => {
       });
 
       it('should stop event propagation when comment form is submitted', async () => {
-        const user = userEvent.setup();
         const mockPosts = [
           {
             id: 'post-1',
@@ -2885,7 +2877,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         });
 
         // Render without calling renderProfile to avoid mock override
-        const result = render(
+        render(
           <BrowserRouter>
             <AuthProvider>
               <Profile />
@@ -3063,7 +3055,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         });
 
         // Render without calling renderProfile to avoid mock override
-        const result = render(
+        render(
           <BrowserRouter>
             <AuthProvider>
               <Profile />
@@ -3107,7 +3099,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         });
 
         // Render without calling renderProfile to avoid mock override
-        const result = render(
+        render(
           <BrowserRouter>
             <AuthProvider>
               <Profile />
@@ -3151,7 +3143,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         });
 
         // Render without calling renderProfile to avoid mock override
-        const result = render(
+        render(
           <BrowserRouter>
             <AuthProvider>
               <Profile />
@@ -3247,7 +3239,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         });
 
         // Render without calling renderProfile to avoid mock override
-        const result = render(
+        render(
           <BrowserRouter>
             <AuthProvider>
               <Profile />
@@ -3288,7 +3280,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
       mockImage.onload = null;
       mockImage.onerror = null;
       mockImage.src = '';
-      global.alert = vi.fn();
+      window.alert = vi.fn();
     });
 
     describe('✅ File selection', () => {
@@ -3332,7 +3324,6 @@ describe('Profile Component - D. Followers/Following modals', () => {
       });
 
       it('should process image file when file is selected', async () => {
-        const user = userEvent.setup();
         mockParamId = undefined; // Own profile
         
         vi.mocked(api.default.getUserProfile).mockResolvedValue({
@@ -3434,7 +3425,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
 
         // Wait for alert
         await waitFor(() => {
-          expect(global.alert).toHaveBeenCalledWith('Please select an image file.');
+          expect(window.alert).toHaveBeenCalledWith('Please select an image file.');
         }, { timeout: 3000 });
       });
     });

@@ -87,14 +87,14 @@ export function setupCanvasMocks(options: CanvasMockOptions = {}): CanvasMocks {
     };
     
     toBlobSpy = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob')
-      .mockImplementation(toBlobCallback || defaultToBlobCallback);
+      .mockImplementation(toBlobCallback || defaultToBlobCallback) as any;
   }
 
   return {
     context: mockContext,
-    toDataURL: toDataURLSpy,
+    toDataURL: toDataURLSpy as any,
     toBlob: toBlobSpy,
-    getContext: getContextSpy,
+    getContext: getContextSpy as any,
   };
 }
 
