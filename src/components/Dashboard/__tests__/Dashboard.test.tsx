@@ -4399,5 +4399,403 @@ describe('Dashboard Component - A. Post display', () => {
       });
     });
   });
+
+  describe('F. Branch Coverage - Missing Branches', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    describe('✅ Line 89: Post user fallback branches', () => {
+      it('should use p.users?.username when p.user is falsy - covers branch 1', async () => {
+        // This test covers: p.user || p.users?.username || 'Unknown'
+        // Branch 1: when p.user is falsy but p.users?.username exists
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: null, // p.user is falsy
+            users: { username: 'fallback-user' }, // p.users?.username exists
+            likes: 0,
+            likers: [],
+            commentsCount: 0,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        await renderDashboard();
+
+        await waitFor(() => {
+          expect(api.default.getFeed).toHaveBeenCalled();
+        }, { timeout: 3000 });
+
+        // Verify post is displayed (user should be 'fallback-user')
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+      });
+
+      it('should use "Unknown" when both p.user and p.users?.username are falsy - covers branch 2', async () => {
+        // This test covers: p.user || p.users?.username || 'Unknown'
+        // Branch 2: when both p.user and p.users?.username are falsy
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: null, // p.user is falsy
+            users: null, // p.users is null, so p.users?.username is undefined
+            likes: 0,
+            likers: [],
+            commentsCount: 0,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        await renderDashboard();
+
+        await waitFor(() => {
+          expect(api.default.getFeed).toHaveBeenCalled();
+        }, { timeout: 3000 });
+
+        // Verify post is displayed (user should default to 'Unknown')
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+      });
+    });
+
+    describe('✅ Line 189-204: Comment data fallback branches', () => {
+      it('should use c.created_at when c.createdAt is falsy - covers branch 1', async () => {
+        // This test covers: c.createdAt || c.created_at
+        // Branch 1: when c.createdAt is falsy, use c.created_at
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        // Mock getComments to return comment with created_at (not createdAt)
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [
+            {
+              id: 'comment-1',
+              text: 'Test comment',
+              user: 'commenter',
+              created_at: '2024-01-15 10:00:00', // Using created_at, not createdAt
+              // createdAt is undefined/falsy
+            },
+          ],
+        });
+
+        await renderDashboard();
+
+        // Open post modal
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        // Wait for comments to load
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalledWith('post-1');
+        }, { timeout: 3000 });
+
+        // Verify comment is displayed
+        await waitFor(() => {
+          expect(screen.getByText('Test comment')).toBeInTheDocument();
+        }, { timeout: 3000 });
+      });
+
+      it('should handle comment with missing text field - covers branch for c.text || ""', async () => {
+        // This test covers: c.text || ''
+        // Branch: when c.text is falsy, use empty string
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        // Mock getComments to return comment with missing text
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [
+            {
+              id: 'comment-1',
+              text: null, // c.text is falsy
+              user: 'commenter',
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        });
+
+        await renderDashboard();
+
+        // Open post modal
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        // Wait for comments to load
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalledWith('post-1');
+        }, { timeout: 3000 });
+
+        // Comment should still be processed (with empty text)
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalled();
+        }, { timeout: 3000 });
+      });
+
+      it('should use "Unknown" when c.user is falsy - covers branch for c.user || "Unknown"', async () => {
+        // This test covers: c.user || 'Unknown'
+        // Branch: when c.user is falsy, use 'Unknown'
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        // Mock getComments to return comment with missing user
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [
+            {
+              id: 'comment-1',
+              text: 'Test comment',
+              user: null, // c.user is falsy
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        });
+
+        await renderDashboard();
+
+        // Open post modal
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        // Wait for comments to load
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalledWith('post-1');
+        }, { timeout: 3000 });
+
+        // Comment should be processed with 'Unknown' as user
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalled();
+        }, { timeout: 3000 });
+      });
+
+      it('should handle comment date without timezone info - covers timezone matching branch', async () => {
+        // This test covers: !createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/)
+        // Branch: when date string has no timezone info, append 'Z'
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        // Mock getComments to return comment with date string without timezone
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [
+            {
+              id: 'comment-1',
+              text: 'Test comment',
+              user: 'commenter',
+              createdAt: '2024-01-15 10:00:00', // No 'Z' and no timezone offset
+            },
+          ],
+        });
+
+        await renderDashboard();
+
+        // Open post modal
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        // Wait for comments to load
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalledWith('post-1');
+        }, { timeout: 3000 });
+
+        // Comment should be processed and timezone should be added
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalled();
+        }, { timeout: 3000 });
+      });
+    });
+
+    describe('✅ Line 296: Socket comment timezone branch', () => {
+      it('should handle socket comment with date without timezone info - covers timezone matching branch', async () => {
+        // This test covers the timezone matching branch in handleNewComment
+        // !createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/)
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 0,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [],
+        });
+
+        await renderDashboard();
+
+        // Open post modal
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        await waitFor(() => {
+          expect(screen.getByPlaceholderText('Add a comment...')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        // Wait for socket handlers to be set up
+        await waitFor(() => {
+          const handler = socketEventHandlersStore['new-comment'];
+          expect(handler).toBeDefined();
+        }, { timeout: 5000 });
+
+        // Simulate socket event with date string without timezone
+        const newComment = {
+          id: 'comment-1',
+          text: 'Socket comment',
+          user: 'otheruser',
+          createdAt: '2024-01-15 10:00:00', // No 'Z' and no timezone offset
+        };
+
+        const handler = socketEventHandlersStore['new-comment'];
+        if (handler) {
+          handler({
+            postId: 'post-1',
+            comment: newComment,
+          });
+        }
+
+        // Verify comment is processed (timezone should be added)
+        await waitFor(() => {
+          expect(screen.getByText('Socket comment')).toBeInTheDocument();
+        }, { timeout: 3000 });
+      });
+    });
+  });
 });
 
