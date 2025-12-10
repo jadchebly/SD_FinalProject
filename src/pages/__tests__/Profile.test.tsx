@@ -200,9 +200,14 @@ vi.stubGlobal('Image', MockImage);
 // Mock HTMLCanvasElement for image compression
 const mockCanvasContext = {
   drawImage: vi.fn(),
-  toDataURL: vi.fn(() => 'data:image/jpeg;base64,compressed-image-data'),
 };
+// Mock getContext to return our mocked context
 vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(mockCanvasContext as any);
+
+// Mock toDataURL on the canvas element itself (not the context)
+// The code calls canvas.toDataURL(), not ctx.toDataURL()
+const mockCanvasToDataURL = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+  .mockReturnValue('data:image/jpeg;base64,compressed-image-data');
 
 const renderProfile = async (profileOverrides?: {
   followerCount?: number;
@@ -300,6 +305,11 @@ describe('Profile Component - D. Followers/Following modals', () => {
     mockUnfollowUser.mockClear();
     mockUpdateAvatar.mockClear();
     mockLogout.mockClear();
+    // Reset canvas mocks
+    mockCanvasContext.drawImage.mockClear();
+    mockCanvasToDataURL.mockClear();
+    // Reset the mock return value in case it was changed
+    mockCanvasToDataURL.mockReturnValue('data:image/jpeg;base64,compressed-image-data');
     for (const key in socketEventHandlersStore) {
       delete socketEventHandlersStore[key];
     }
@@ -3832,6 +3842,10 @@ describe('Profile Component - D. Followers/Following modals', () => {
       fileReaderReadAsDataURLSpy.mockClear();
       lastFileReaderInstance = null; // Reset FileReader instance tracker
       lastImageInstance = null; // Reset Image instance tracker
+      // Reset canvas mocks
+      mockCanvasContext.drawImage.mockClear();
+      mockCanvasToDataURL.mockClear();
+      mockCanvasToDataURL.mockReturnValue('data:image/jpeg;base64,compressed-image-data');
       // Reset mockImage template properties (new instances will copy from this)
       mockImage.onload = null;
       mockImage.onerror = null;
@@ -4063,6 +4077,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         // Verify canvas context was used for compression
         await waitFor(() => {
           expect(mockCanvasContext.drawImage).toHaveBeenCalled();
+          expect(mockCanvasToDataURL).toHaveBeenCalled();
         }, { timeout: 3000 });
       });
 
@@ -4149,7 +4164,7 @@ describe('Profile Component - D. Followers/Following modals', () => {
         // Wait for canvas compression to complete
         await waitFor(() => {
           expect(mockCanvasContext.drawImage).toHaveBeenCalled();
-          expect(mockCanvasContext.toDataURL).toHaveBeenCalled();
+          expect(mockCanvasToDataURL).toHaveBeenCalled();
         }, { timeout: 3000 });
 
         // Wait for updateAvatar to be called with compressed image
