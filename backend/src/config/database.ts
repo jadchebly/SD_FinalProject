@@ -159,8 +159,7 @@ function getPool(): Pool {
     poolPromise = initializePool();
   }
   
-  // For synchronous access, we'll create a temporary pool with env vars
-  // The async initialization will happen on first query
+
   if (!pool) {
     // Check for Azure PostgreSQL variables first, then fall back to standard DB_* variables
     const config = process.env.AZURE_POSTGRESQL_HOST ? {
@@ -177,7 +176,6 @@ function getPool(): Pool {
       password: process.env.DB_PASSWORD || '',
     };
 
-    // Determine SSL configuration - prioritize Azure PostgreSQL SSL setting
     const useSSL = process.env.AZURE_POSTGRESQL_SSL === 'true' || 
                    process.env.AZURE_POSTGRESQL_SSL === '1' ||
                    (process.env.AZURE_POSTGRESQL_HOST && process.env.DB_SSL !== 'false') ||

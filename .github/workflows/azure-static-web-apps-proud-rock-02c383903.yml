@@ -34,7 +34,7 @@ jobs:
         env:
           # 👇 This is what Vite will see in import.meta.env
           VITE_BACKEND_URL_PRODUCTION: ${{ secrets.VITE_BACKEND_URL_STAGING }}
-          NODE_ENV: production
+          NODE_ENV: production #needed for vite to build the app
         run: |
           if [ -z "$VITE_BACKEND_URL_PRODUCTION" ]; then
             echo "❌ ERROR: VITE_BACKEND_URL_PRODUCTION is not set!"

@@ -22,14 +22,19 @@ const io = new Server(httpServer, {
         return callback(null, true);
       }
       
-      // Use production URL if in production, otherwise use development URL
+      // Determine environment and frontend URL
       const isProduction = process.env.NODE_ENV === 'production';
+      const isStaging = process.env.NODE_ENV === 'staging' || process.env.AZURE_POSTGRESQL_HOST; // Staging if using Azure DB
       const frontendUrl = isProduction 
         ? process.env.FRONTEND_URL_PRODUCTION 
+        : isStaging
+        ? process.env.FRONTEND_URL_STAGING
         : process.env.FRONTEND_URL;
       
       const allowedOrigins = [
         frontendUrl,
+        process.env.FRONTEND_URL_STAGING,
+        process.env.FRONTEND_URL_PRODUCTION,
         'http://localhost:5173',
         'http://localhost:5174',
       ].filter(Boolean);
@@ -39,8 +44,8 @@ const io = new Server(httpServer, {
         return callback(null, true);
       }
       
-      // In production, also allow Azure Static Web Apps domains
-      if (isProduction && origin.includes('.azurestaticapps.net')) {
+      // Allow Azure Static Web Apps domains (for both production and staging)
+      if (origin.includes('.azurestaticapps.net')) {
         return callback(null, true);
       }
       
@@ -70,14 +75,19 @@ app.use(cors({
       return callback(null, true);
     }
     
-    // Use production URL if in production, otherwise use development URL
+    // Determine environment and frontend URL
     const isProduction = process.env.NODE_ENV === 'production';
+    const isStaging = process.env.NODE_ENV === 'staging' || process.env.AZURE_POSTGRESQL_HOST; // Staging if using Azure DB
     const frontendUrl = isProduction 
       ? process.env.FRONTEND_URL_PRODUCTION 
+      : isStaging
+      ? process.env.FRONTEND_URL_STAGING
       : process.env.FRONTEND_URL;
     
     const allowedOrigins = [
       frontendUrl,
+      process.env.FRONTEND_URL_STAGING,
+      process.env.FRONTEND_URL_PRODUCTION,
       'http://localhost:5173',
       'http://localhost:5174',
     ].filter(Boolean);
@@ -87,9 +97,9 @@ app.use(cors({
       return callback(null, true);
     }
     
-    // In production, also allow Azure Static Web Apps domains
+    // Allow Azure Static Web Apps domains (for both production and staging)
     // Azure Static Web Apps can have different subdomains (e.g., .1., .2., .3., etc.)
-    if (isProduction && origin.includes('.azurestaticapps.net')) {
+    if (origin.includes('.azurestaticapps.net')) {
       return callback(null, true);
     }
     
