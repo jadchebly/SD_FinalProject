@@ -4,7 +4,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act } from '@testing-library/react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -462,14 +461,14 @@ describe('Navbar Component - C. People search', () => {
     mockLocationPathname = '/dashboard';
     followingList = [];
     
-    // Reset mock functions
-    mockFollowUserFn = vi.fn(async (userId: string) => {
+    // Reset mock functions using mockImplementation
+    mockFollowUserFn.mockImplementation(async (userId: string) => {
       followingList.push(userId);
     });
-    mockUnfollowUserFn = vi.fn(async (userId: string) => {
+    mockUnfollowUserFn.mockImplementation(async (userId: string) => {
       followingList = followingList.filter(id => id !== userId);
     });
-    mockGetFollowingListFn = vi.fn(() => followingList);
+    mockGetFollowingListFn.mockImplementation(() => followingList);
 
     vi.mocked(api.default.searchUsers).mockResolvedValue({
       success: true,

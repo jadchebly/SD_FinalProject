@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SuggestedUsersModal from '../SuggestedUsersModal';
 import * as api from '../../services/api';
@@ -19,7 +19,7 @@ vi.mock('../../services/api', () => ({
 }));
 
 // Mock window.scrollTo
-global.window.scrollTo = vi.fn();
+window.scrollTo = vi.fn();
 
 const mockUser = {
   id: 'user-123',
@@ -30,7 +30,7 @@ const mockUser = {
 
 const mockFollowUser = vi.fn();
 const mockUnfollowUser = vi.fn();
-const mockGetFollowingList = vi.fn(() => []);
+const mockGetFollowingList = vi.fn<string[], []>(() => []);
 
 // Mock AuthContext
 vi.mock('../../contexts/AuthContext', async () => {
