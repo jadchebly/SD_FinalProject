@@ -107,26 +107,41 @@ Object.defineProperty(HTMLVideoElement.prototype, 'videoHeight', {
 });
 
 // Mock MediaRecorder as a proper class
-// Create a shared mockMediaRecorder instance for tests
-const mockMediaRecorder = {
-  state: 'inactive',
-  start: vi.fn(),
-  stop: vi.fn(),
-  ondataavailable: null as ((e: BlobEvent) => void) | null,
-  onstop: null as (() => void) | null,
-};
-
 // Store the last created MediaRecorder instance for tests to access
 let lastMediaRecorderInstance: any = null;
 
-// Create a proper class constructor wrapped in vi.fn() to track calls
-// When used with 'new', it should return the shared mock instance
-const MockMediaRecorder = vi.fn().mockImplementation(function(this: any, stream: MediaStream, options?: MediaRecorderOptions) {
-  // Copy properties from shared mock instance to 'this'
-  Object.assign(this, mockMediaRecorder);
+// Create a constructor function that can be used with 'new'
+function MockMediaRecorderConstructor(this: any, stream: MediaStream, options?: MediaRecorderOptions) {
+  if (!(this instanceof MockMediaRecorderConstructor)) {
+    return new (MockMediaRecorderConstructor as any)(stream, options);
+  }
+  
+  this.state = 'inactive';
+  this.start = vi.fn();
+  this.stop = vi.fn(() => {
+    // When stop is called, trigger onstop handler if it exists
+    if (this.onstop && typeof this.onstop === 'function') {
+      this.onstop();
+    }
+    this.state = 'inactive';
+  });
+  this.ondataavailable = null;
+  this.onstop = null;
+  
   lastMediaRecorderInstance = this; // Track the instance
-  return this;
-}) as any;
+}
+
+// Add static method
+MockMediaRecorderConstructor.isTypeSupported = vi.fn((mimeType: string) => {
+  return mimeType === 'video/webm;codecs=vp9' || mimeType === 'video/webm;codecs=vp8';
+});
+
+// Wrap in vi.fn() to track calls, but ensure it works as a constructor
+const MockMediaRecorder = vi.fn(MockMediaRecorderConstructor) as any;
+MockMediaRecorder.isTypeSupported = MockMediaRecorderConstructor.isTypeSupported;
+
+// Assign to global
+global.MediaRecorder = MockMediaRecorder;
 
 // Add static method
 MockMediaRecorder.isTypeSupported = vi.fn((mimeType: string) => {
@@ -1864,11 +1879,6 @@ describe('CreatePost Component', () => {
   describe('F. Video recording functionality', () => {
     beforeEach(() => {
       // Reset MediaRecorder mock
-      mockMediaRecorder.state = 'inactive';
-      mockMediaRecorder.start.mockClear();
-      mockMediaRecorder.stop.mockClear();
-      mockMediaRecorder.ondataavailable = null;
-      mockMediaRecorder.onstop = null;
       lastMediaRecorderInstance = null; // Reset instance tracker
       MockMediaRecorder.mockClear();
       (MockMediaRecorder as any).isTypeSupported.mockReturnValue(true);
@@ -1904,7 +1914,8 @@ describe('CreatePost Component', () => {
         // Verify MediaRecorder was created and started
         await waitFor(() => {
           expect(MockMediaRecorder).toHaveBeenCalled();
-          expect(mockMediaRecorder.start).toHaveBeenCalled();
+          expect(lastMediaRecorderInstance).toBeDefined();
+          expect(lastMediaRecorderInstance.start).toHaveBeenCalled();
         }, { timeout: 3000 });
       });
 
@@ -1933,7 +1944,9 @@ describe('CreatePost Component', () => {
         // Since we can't easily access the component's state, we'll verify the button behavior
         // The actual state change happens in the component, so we verify MediaRecorder was called
         await waitFor(() => {
-          expect(mockMediaRecorder.start).toHaveBeenCalled();
+          expect(MockMediaRecorder).toHaveBeenCalled();
+          expect(lastMediaRecorderInstance).toBeDefined();
+          expect(lastMediaRecorderInstance.start).toHaveBeenCalled();
         }, { timeout: 3000 });
       });
 
@@ -2061,8 +2074,8 @@ describe('CreatePost Component', () => {
           expect(alertSpy).toHaveBeenCalledWith('Unable to start recording on this browser.');
         }, { timeout: 3000 });
 
-        // Reset mock for other tests
-        MockMediaRecorder.mockImplementation(() => mockMediaRecorder);
+        // Reset mock for other tests - restore original implementation
+        MockMediaRecorder.mockImplementation(MockMediaRecorderConstructor);
 
         alertSpy.mockRestore();
         consoleErrorSpy.mockRestore();
@@ -2072,9 +2085,6 @@ describe('CreatePost Component', () => {
     describe('✅ Stop recording', () => {
       it('should stop MediaRecorder when Stop Recording button is clicked', async () => {
         const user = userEvent.setup();
-        
-        // Setup MediaRecorder to simulate recording state
-        mockMediaRecorder.state = 'recording';
         
         await renderCreatePost();
 
@@ -2095,15 +2105,24 @@ describe('CreatePost Component', () => {
         await user.click(startRecordingButton);
 
         await waitFor(() => {
-          expect(mockMediaRecorder.start).toHaveBeenCalled();
+          expect(MockMediaRecorder).toHaveBeenCalled();
         }, { timeout: 3000 });
 
-        // Manually trigger the recording state by simulating the component's behavior
-        // Since we can't easily access component state, we'll verify stop is callable
-        // The actual UI state change is handled by the component
-        
-        // Verify MediaRecorder.stop can be called
-        expect(mockMediaRecorder.stop).toBeDefined();
+        // Wait for Stop Recording button to appear
+        await waitFor(() => {
+          expect(screen.getByRole('button', { name: /stop recording/i })).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        // Click Stop Recording button
+        const stopRecordingButton = screen.getByRole('button', { name: /stop recording/i });
+        await user.click(stopRecordingButton);
+
+        // Verify MediaRecorder.stop was called on the instance
+        await waitFor(() => {
+          const mrInstance = lastMediaRecorderInstance;
+          expect(mrInstance).toBeDefined();
+          expect(mrInstance.stop).toHaveBeenCalled();
+        }, { timeout: 3000 });
       });
 
       it('should create blob and set recorded video when recording stops', async () => {
@@ -2135,24 +2154,30 @@ describe('CreatePost Component', () => {
         await user.click(startRecordingButton);
 
         await waitFor(() => {
-          expect(mockMediaRecorder.start).toHaveBeenCalled();
+          expect(MockMediaRecorder).toHaveBeenCalled();
         }, { timeout: 3000 });
 
-        // Simulate data available event (use last instance if available)
-        const mrInstance = lastMediaRecorderInstance || mockMediaRecorder;
+        // Get the MediaRecorder instance
+        const mrInstance = lastMediaRecorderInstance;
+        expect(mrInstance).toBeDefined();
+        expect(mrInstance.start).toHaveBeenCalled();
+
+        // Wait for Stop Recording button and click it
+        await waitFor(() => {
+          expect(screen.getByRole('button', { name: /stop recording/i })).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        // Simulate data available event before stopping (component collects chunks)
         if (mrInstance.ondataavailable) {
           mrInstance.ondataavailable(mockBlobEvent);
         }
 
-        // Simulate stop event
-        await act(async () => {
-          if (mrInstance.onstop) {
-            mrInstance.onstop();
-          }
-        });
+        const stopRecordingButton = screen.getByRole('button', { name: /stop recording/i });
+        await user.click(stopRecordingButton);
 
-        // Verify URL.createObjectURL was called (happens in onstop handler)
+        // The stop() method should trigger onstop automatically, which creates the blob
         await waitFor(() => {
+          expect(mrInstance.stop).toHaveBeenCalled();
           expect(global.URL.createObjectURL).toHaveBeenCalled();
         }, { timeout: 3000 });
       });
@@ -2182,22 +2207,27 @@ describe('CreatePost Component', () => {
         await user.click(startRecordingButton);
 
         await waitFor(() => {
-          expect(mockMediaRecorder.start).toHaveBeenCalled();
+          expect(MockMediaRecorder).toHaveBeenCalled();
         }, { timeout: 3000 });
 
-        // The type should already be video since we set it
-        expect(typeSelect).toHaveValue('video');
+        // Wait for Stop Recording button and click it to trigger stop
+        await waitFor(() => {
+          expect(screen.getByRole('button', { name: /stop recording/i })).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const stopRecordingButton = screen.getByRole('button', { name: /stop recording/i });
+        await user.click(stopRecordingButton);
+
+        // Wait for type to be set to video (happens in onstop handler)
+        await waitFor(() => {
+          expect(typeSelect).toHaveValue('video');
+        }, { timeout: 3000 });
       });
 
       it('should handle stop error gracefully', async () => {
         const user = userEvent.setup();
         const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         
-        // Mock stop to throw error
-        mockMediaRecorder.stop.mockImplementation(() => {
-          throw new Error('Stop failed');
-        });
-
         await renderCreatePost();
 
         // Set type to video
@@ -2217,14 +2247,28 @@ describe('CreatePost Component', () => {
         await user.click(startRecordingButton);
 
         await waitFor(() => {
-          expect(mockMediaRecorder.start).toHaveBeenCalled();
+          expect(MockMediaRecorder).toHaveBeenCalled();
         }, { timeout: 3000 });
 
-        // The stop error is caught in the component, so we verify it doesn't crash
-        // The actual error handling happens in the component's try-catch
+        // Get the instance and make stop throw an error
+        const mrInstance = lastMediaRecorderInstance;
+        expect(mrInstance).toBeDefined();
+        mrInstance.stop.mockImplementation(() => {
+          throw new Error('Stop failed');
+        });
 
-        // Reset mock
-        mockMediaRecorder.stop.mockImplementation(() => {});
+        // Wait for Stop Recording button and click it
+        await waitFor(() => {
+          expect(screen.getByRole('button', { name: /stop recording/i })).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const stopRecordingButton = screen.getByRole('button', { name: /stop recording/i });
+        await user.click(stopRecordingButton);
+
+        // The error should be caught and logged, but not crash the component
+        await waitFor(() => {
+          expect(consoleErrorSpy).toHaveBeenCalled();
+        }, { timeout: 3000 });
 
         consoleErrorSpy.mockRestore();
       });
@@ -2254,10 +2298,12 @@ describe('CreatePost Component', () => {
 
         await waitFor(() => {
           expect(MockMediaRecorder).toHaveBeenCalled();
+          expect(lastMediaRecorderInstance).toBeDefined();
         }, { timeout: 3000 });
 
         // Verify ondataavailable handler was set (check last instance)
-        const mrInstance = lastMediaRecorderInstance || mockMediaRecorder;
+        const mrInstance = lastMediaRecorderInstance;
+        expect(mrInstance).toBeDefined();
         expect(mrInstance.ondataavailable).toBeDefined();
         expect(typeof mrInstance.ondataavailable).toBe('function');
       });
@@ -2285,10 +2331,12 @@ describe('CreatePost Component', () => {
 
         await waitFor(() => {
           expect(MockMediaRecorder).toHaveBeenCalled();
+          expect(lastMediaRecorderInstance).toBeDefined();
         }, { timeout: 3000 });
 
         // Verify onstop handler was set (check last instance)
-        const mrInstance = lastMediaRecorderInstance || mockMediaRecorder;
+        const mrInstance = lastMediaRecorderInstance;
+        expect(mrInstance).toBeDefined();
         expect(mrInstance.onstop).toBeDefined();
         expect(typeof mrInstance.onstop).toBe('function');
       });
@@ -2314,14 +2362,58 @@ describe('CreatePost Component', () => {
         const startRecordingButton = screen.getByRole('button', { name: /start recording/i });
         await user.click(startRecordingButton);
 
+        // Wait for MediaRecorder to be created and started
         await waitFor(() => {
-          expect(mockMediaRecorder.start).toHaveBeenCalled();
+          expect(MockMediaRecorder).toHaveBeenCalled();
+          expect(lastMediaRecorderInstance).toBeDefined();
         }, { timeout: 3000 });
+
+        // Get the first instance
+        const firstInstance = lastMediaRecorderInstance;
+        expect(firstInstance).toBeDefined();
+        expect(firstInstance.start).toHaveBeenCalled();
+
+        // Store the first call count
+        const firstCallCount = MockMediaRecorder.mock.calls.length;
+
+        // Stop recording first (to allow starting a new one)
+        await waitFor(() => {
+          expect(screen.getByRole('button', { name: /stop recording/i })).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const stopRecordingButton = screen.getByRole('button', { name: /stop recording/i });
+        await user.click(stopRecordingButton);
+
+        // Wait for camera to close (stopCamera is called in onstop)
+        await waitFor(() => {
+          expect(screen.queryByRole('button', { name: /stop recording/i })).not.toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        // The component should clear recordedVideo when starting a new recording
+        // We verify this by checking that a new MediaRecorder is created
+        // But first we need to open camera and start recording again
+        // However, since stopCamera closes the camera, we need to reopen it
+        const openCameraButton2 = screen.getByRole('button', { name: /open camera/i });
+        await user.click(openCameraButton2);
+        
+        await waitFor(() => {
+          expect(mockGetUserMedia).toHaveBeenCalled();
+        }, { timeout: 3000 });
+
+        await waitFor(() => {
+          expect(screen.getByRole('button', { name: /start recording/i })).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        // Start recording again (this should create a new MediaRecorder)
+        const startRecordingButton2 = screen.getByRole('button', { name: /start recording/i });
+        await user.click(startRecordingButton2);
 
         // The component clears recordedChunksRef.current and setRecordedVideo(null)
         // before starting new recording. This is tested indirectly by verifying
         // that a new MediaRecorder is created each time.
-        expect(MockMediaRecorder).toHaveBeenCalled();
+        await waitFor(() => {
+          expect(MockMediaRecorder.mock.calls.length).toBeGreaterThan(firstCallCount);
+        }, { timeout: 3000 });
       });
     });
   });
