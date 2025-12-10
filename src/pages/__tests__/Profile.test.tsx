@@ -10,6 +10,7 @@ import { BrowserRouter } from 'react-router-dom';
 import Profile from '../Profile';
 import { AuthProvider } from '../../contexts/AuthContext';
 import * as api from '../../services/api';
+import { setupCanvasMocks, resetCanvasMocks, type CanvasMocks } from '../../test/utils/canvasMock';
 
 // Mock socket.io-client
 vi.mock('socket.io-client', () => {
@@ -197,17 +198,11 @@ class MockImage {
 
 vi.stubGlobal('Image', MockImage);
 
-// Mock HTMLCanvasElement for image compression
-const mockCanvasContext = {
-  drawImage: vi.fn(),
-};
-// Mock getContext to return our mocked context
-vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(mockCanvasContext as any);
-
-// Mock toDataURL on the canvas element itself (not the context)
-// The code calls canvas.toDataURL(), not ctx.toDataURL()
-const mockCanvasToDataURL = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL')
-  .mockReturnValue('data:image/jpeg;base64,compressed-image-data');
+// Setup canvas mocks using shared utility
+// This mocks HTMLCanvasElement.prototype.getContext and toDataURL
+const canvasMocks = setupCanvasMocks({
+  toDataURLReturnValue: 'data:image/jpeg;base64,compressed-image-data',
+});
 
 const renderProfile = async (profileOverrides?: {
   followerCount?: number;
@@ -305,11 +300,10 @@ describe('Profile Component - D. Followers/Following modals', () => {
     mockUnfollowUser.mockClear();
     mockUpdateAvatar.mockClear();
     mockLogout.mockClear();
-    // Reset canvas mocks
-    mockCanvasContext.drawImage.mockClear();
-    mockCanvasToDataURL.mockClear();
+    // Reset canvas mocks using shared utility
+    resetCanvasMocks(canvasMocks);
     // Reset the mock return value in case it was changed
-    mockCanvasToDataURL.mockReturnValue('data:image/jpeg;base64,compressed-image-data');
+    canvasMocks.toDataURL.mockReturnValue('data:image/jpeg;base64,compressed-image-data');
     for (const key in socketEventHandlersStore) {
       delete socketEventHandlersStore[key];
     }
@@ -3842,10 +3836,9 @@ describe('Profile Component - D. Followers/Following modals', () => {
       fileReaderReadAsDataURLSpy.mockClear();
       lastFileReaderInstance = null; // Reset FileReader instance tracker
       lastImageInstance = null; // Reset Image instance tracker
-      // Reset canvas mocks
-      mockCanvasContext.drawImage.mockClear();
-      mockCanvasToDataURL.mockClear();
-      mockCanvasToDataURL.mockReturnValue('data:image/jpeg;base64,compressed-image-data');
+      // Reset canvas mocks using shared utility
+      resetCanvasMocks(canvasMocks);
+      canvasMocks.toDataURL.mockReturnValue('data:image/jpeg;base64,compressed-image-data');
       // Reset mockImage template properties (new instances will copy from this)
       mockImage.onload = null;
       mockImage.onerror = null;
@@ -4076,8 +4069,8 @@ describe('Profile Component - D. Followers/Following modals', () => {
 
         // Verify canvas context was used for compression
         await waitFor(() => {
-          expect(mockCanvasContext.drawImage).toHaveBeenCalled();
-          expect(mockCanvasToDataURL).toHaveBeenCalled();
+          expect(canvasMocks.context.drawImage).toHaveBeenCalled();
+          expect(canvasMocks.toDataURL).toHaveBeenCalled();
         }, { timeout: 3000 });
       });
 
@@ -4163,8 +4156,8 @@ describe('Profile Component - D. Followers/Following modals', () => {
 
         // Wait for canvas compression to complete
         await waitFor(() => {
-          expect(mockCanvasContext.drawImage).toHaveBeenCalled();
-          expect(mockCanvasToDataURL).toHaveBeenCalled();
+          expect(canvasMocks.context.drawImage).toHaveBeenCalled();
+          expect(canvasMocks.toDataURL).toHaveBeenCalled();
         }, { timeout: 3000 });
 
         // Wait for updateAvatar to be called with compressed image

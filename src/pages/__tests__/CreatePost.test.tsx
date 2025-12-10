@@ -10,6 +10,7 @@ import { BrowserRouter } from 'react-router-dom';
 import CreatePost from '../CreatePost';
 import { AuthProvider } from '../../contexts/AuthContext';
 import * as api from '../../services/api';
+import { setupCanvasMocks, resetCanvasMocks, type CanvasMocks } from '../../test/utils/canvasMock';
 
 // Mock the API
 vi.mock('../../services/api', () => ({
@@ -57,21 +58,17 @@ Object.defineProperty(global.navigator, 'mediaDevices', {
   },
 });
 
-// Mock Canvas API
-const mockCanvasContext = {
-  drawImage: vi.fn(),
-};
-
-const mockCanvas = {
-  width: 640,
-  height: 480,
-  getContext: vi.fn(() => mockCanvasContext),
-  toBlob: vi.fn((callback: (blob: Blob | null) => void) => {
+// Setup canvas mocks using shared utility
+// This mocks HTMLCanvasElement.prototype.getContext, toDataURL, and toBlob
+// Note: CreatePost uses both toDataURL (for image compression) and toBlob (for camera capture)
+const canvasMocks = setupCanvasMocks({
+  toDataURLReturnValue: 'data:image/png;base64,test',
+  toBlobEnabled: true,
+  toBlobCallback: (callback: (blob: Blob | null) => void) => {
     const blob = new Blob(['test'], { type: 'image/jpeg' });
     callback(blob);
-  }),
-  toDataURL: vi.fn(() => 'data:image/png;base64,test'),
-};
+  },
+});
 
 // Mock HTMLVideoElement
 const mockVideoElement = {
@@ -197,12 +194,16 @@ describe('CreatePost Component', () => {
       { stop: vi.fn(), kind: 'video' },
       { stop: vi.fn(), kind: 'audio' },
     ]);
-    mockCanvas.getContext.mockReturnValue(mockCanvasContext);
-    mockCanvas.toBlob.mockImplementation((callback: (blob: Blob | null) => void) => {
-      const blob = new Blob(['test'], { type: 'image/jpeg' });
-      callback(blob);
-    });
-    mockCanvas.toDataURL.mockReturnValue('data:image/png;base64,test');
+    // Reset canvas mocks using shared utility
+    resetCanvasMocks(canvasMocks);
+    // Reset return values
+    canvasMocks.toDataURL.mockReturnValue('data:image/png;base64,test');
+    if (canvasMocks.toBlob) {
+      canvasMocks.toBlob.mockImplementation((callback: (blob: Blob | null) => void) => {
+        const blob = new Blob(['test'], { type: 'image/jpeg' });
+        callback(blob);
+      });
+    }
     mockVideoElement.play.mockResolvedValue(undefined);
     mockVideoElement.srcObject = null;
     
