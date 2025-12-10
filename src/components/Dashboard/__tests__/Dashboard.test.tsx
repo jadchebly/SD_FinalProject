@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import Dashboard from '../Dashboard';
@@ -1064,7 +1064,11 @@ describe('Dashboard Component - A. Post display', () => {
         expect(commentItems.length).toBe(3);
 
         // Close modal by clicking close button
-        const closeButton = screen.getByRole('button', { name: /close modal/i });
+        // Scope to post modal to avoid matching suggested users modal close button
+        const postModal = document.querySelector('.post-modal-content');
+        expect(postModal).toBeInTheDocument();
+        const { getByRole } = within(postModal as HTMLElement);
+        const closeButton = getByRole('button', { name: /close modal/i });
         await user.click(closeButton);
 
         // Wait for modal to close
