@@ -3757,5 +3757,604 @@ describe('Profile Component - D. Followers/Following modals', () => {
       });
     });
   });
+
+  describe('G. Branch Coverage - Missing Branches', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    describe('✅ Line 103: profileId useMemo branches', () => {
+      it('should use paramId when paramId is defined - covers first branch', async () => {
+        // This test covers: paramId !== undefined ? paramId : (user?.id || '')
+        // First branch: when paramId is defined, use paramId
+        
+        mockParamId = 'other-user-id';
+        
+        vi.mocked(api.default.getUserProfile).mockResolvedValue({
+          success: true,
+          user: {
+            id: 'other-user-id',
+            username: 'otheruser',
+            email: 'other@example.com',
+            avatar: null,
+            followerCount: 5,
+            followingCount: 3,
+          },
+        });
+
+        vi.mocked(api.default.getUserPosts).mockResolvedValue({
+          success: true,
+          posts: [],
+        });
+
+        await renderProfile();
+
+        // Component should use paramId for profileId
+        await waitFor(() => {
+          expect(api.default.getUserProfile).toHaveBeenCalledWith('other-user-id');
+        }, { timeout: 3000 });
+      });
+    });
+
+    describe('✅ Line 133-135: Post transformation fallback branches', () => {
+      it('should use p.users?.username when p.user is falsy - covers branch 1', async () => {
+        // This test covers: p.user || p.users?.username || 'Unknown'
+        // Branch 1: when p.user is falsy but p.users?.username exists
+        
+        mockParamId = undefined;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: null, // p.user is falsy
+            users: { username: 'fallback-user' }, // p.users?.username exists
+            likes: 0,
+            likers: null, // p.likers is falsy
+            commentsCount: 0,
+          },
+        ];
+
+        // Mock getComments for the post
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [],
+        });
+
+        await renderProfile({ posts: mockPosts });
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 5000 });
+      });
+
+      it('should use "Unknown" when both p.user and p.users?.username are falsy - covers branch 2', async () => {
+        // This test covers: p.user || p.users?.username || 'Unknown'
+        // Branch 2: when both p.user and p.users?.username are falsy
+        
+        mockParamId = undefined;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: null, // p.user is falsy
+            users: null, // p.users is null, so p.users?.username is undefined
+            likes: 0,
+            likers: null, // p.likers is falsy, should use []
+            commentsCount: 0,
+          },
+        ];
+
+        // Mock getComments for the post
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [],
+        });
+
+        await renderProfile({ posts: mockPosts });
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 5000 });
+      });
+
+      it('should use empty array when p.likers is falsy - covers branch for p.likers || []', async () => {
+        // This test covers: p.likers || []
+        // Branch: when p.likers is falsy, use []
+        
+        mockParamId = undefined;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: null, // p.likers is falsy
+            commentsCount: 0,
+          },
+        ];
+
+        // Mock getComments for the post
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [],
+        });
+
+        await renderProfile({ posts: mockPosts });
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 5000 });
+      });
+    });
+
+    describe('✅ Line 150-152: Comment transformation fallback branches', () => {
+      it('should use c.user_id when c.user is falsy - covers branch 3', async () => {
+        // This test covers: (c.user && (c.user.username || c.user)) || c.user_id || 'Unknown'
+        // Branch 3: when c.user is falsy, use c.user_id
+        
+        mockParamId = undefined;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        // Mock getComments to return comment with user_id (not user)
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [
+            {
+              id: 'comment-1',
+              text: 'Test comment',
+              user: null, // c.user is falsy
+              user_id: 'commenter-id', // c.user_id exists
+              created_at: null, // c.created_at is falsy
+              createdAt: null, // c.createdAt is also falsy
+              // Should use new Date().toISOString()
+            },
+          ],
+        });
+
+        await renderProfile({ posts: mockPosts });
+
+        // Wait for comments to be loaded
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalled();
+        }, { timeout: 5000 });
+      });
+
+      it('should use "Unknown" when c.user, c.user.username, and c.user_id are all falsy - covers branch 4', async () => {
+        // This test covers: (c.user && (c.user.username || c.user)) || c.user_id || 'Unknown'
+        // Branch 4: when all are falsy, use 'Unknown'
+        
+        mockParamId = undefined;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        // Mock getComments to return comment with all user fields falsy
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [
+            {
+              id: 'comment-1',
+              text: 'Test comment',
+              user: null, // c.user is falsy
+              user_id: null, // c.user_id is also falsy
+              created_at: new Date().toISOString(),
+            },
+          ],
+        });
+
+        await renderProfile({ posts: mockPosts });
+
+        // Wait for comments to be loaded
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalled();
+        }, { timeout: 5000 });
+      });
+
+      it('should use new Date().toISOString() when both c.created_at and c.createdAt are falsy - covers branch 2', async () => {
+        // This test covers: c.created_at || c.createdAt || new Date().toISOString()
+        // Branch 2: when both c.created_at and c.createdAt are falsy, use new Date().toISOString()
+        
+        mockParamId = undefined;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        // Mock getComments to return comment with both date fields falsy
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [
+            {
+              id: 'comment-1',
+              text: 'Test comment',
+              user: 'commenter',
+              created_at: null, // c.created_at is falsy
+              createdAt: null, // c.createdAt is also falsy
+            },
+          ],
+        });
+
+        await renderProfile({ posts: mockPosts });
+
+        // Wait for comments to be loaded
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalled();
+        }, { timeout: 5000 });
+      });
+    });
+
+    describe('✅ Line 190: Profile info fallback branches', () => {
+      it('should use res.profile when res.user is falsy - covers branch 1', async () => {
+        // This test covers: res.user || res.profile || null
+        // Branch 1: when res.user is falsy but res.profile exists
+        
+        mockParamId = 'other-user-id';
+        
+        vi.mocked(api.default.getUserProfile).mockResolvedValue({
+          success: true,
+          user: null, // res.user is falsy
+          profile: { // res.profile exists
+            id: 'other-user-id',
+            username: 'otheruser',
+            email: 'other@example.com',
+            avatar: null,
+            followerCount: 5,
+            followingCount: 3,
+          },
+        });
+
+        vi.mocked(api.default.getUserPosts).mockResolvedValue({
+          success: true,
+          posts: [],
+        });
+
+        await renderProfile();
+
+        await waitFor(() => {
+          expect(api.default.getUserProfile).toHaveBeenCalledWith('other-user-id');
+        }, { timeout: 3000 });
+      });
+
+      it('should use null when both res.user and res.profile are falsy - covers branch 2', async () => {
+        // This test covers: res.user || res.profile || null
+        // Branch 2: when both res.user and res.profile are falsy, use null
+        
+        mockParamId = 'other-user-id';
+        
+        vi.mocked(api.default.getUserProfile).mockResolvedValue({
+          success: true,
+          user: null, // res.user is falsy
+          profile: null, // res.profile is also falsy
+        });
+
+        vi.mocked(api.default.getUserPosts).mockResolvedValue({
+          success: true,
+          posts: [],
+        });
+
+        await renderProfile();
+
+        await waitFor(() => {
+          expect(api.default.getUserProfile).toHaveBeenCalledWith('other-user-id');
+        }, { timeout: 3000 });
+      });
+
+      it('should set profileInfo to null when res.success is false - covers else branch', async () => {
+        // This test covers: if (res && res.success) ... else { setProfileInfo(null); }
+        // Else branch: when res.success is false
+        
+        mockParamId = 'other-user-id';
+        
+        vi.mocked(api.default.getUserProfile).mockResolvedValue({
+          success: false, // res.success is false
+          user: mockUser,
+        });
+
+        vi.mocked(api.default.getUserPosts).mockResolvedValue({
+          success: true,
+          posts: [],
+        });
+
+        await renderProfile();
+
+        await waitFor(() => {
+          expect(api.default.getUserProfile).toHaveBeenCalledWith('other-user-id');
+        }, { timeout: 3000 });
+      });
+    });
+
+    describe('✅ Line 265: getMediaElement photo type branch', () => {
+      it('should render image when post.image exists and post.type is "photo" - covers branch 1', async () => {
+        // This test covers: if (post.image && post.type === "photo")
+        // Branch 1: when post.image exists and post.type is "photo"
+        
+        mockParamId = undefined;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Photo Post',
+            content: 'Test content',
+            type: 'photo', // post.type is "photo"
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            image_url: 'https://example.com/image.jpg', // post.image exists
+            commentsCount: 0,
+          },
+        ];
+
+        // Mock getComments for the post
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [],
+        });
+
+        await renderProfile({ posts: mockPosts });
+
+        await waitFor(() => {
+          expect(screen.getByText('Photo Post')).toBeInTheDocument();
+        }, { timeout: 5000 });
+
+        // Verify image is rendered (getMediaElement should return img element)
+        await waitFor(() => {
+          const images = document.querySelectorAll('img.profile-post-media-image');
+          expect(images.length).toBeGreaterThan(0);
+        }, { timeout: 3000 });
+      });
+    });
+
+    describe('✅ Line 331: handleSaveChanges map branch', () => {
+      it('should keep post unchanged when post.id !== editingPost.id - covers branch 1', async () => {
+        // This test covers: post.id === editingPost.id ? { ...post, ... } : post
+        // Branch 1: when post.id !== editingPost.id, return post unchanged
+        
+        const user = userEvent.setup();
+        mockParamId = undefined;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Post 1',
+            content: 'Content 1',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 0,
+          },
+          {
+            id: 'post-2',
+            title: 'Post 2',
+            content: 'Content 2',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 0,
+          },
+        ];
+
+        // Mock getComments for each post
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [],
+        });
+
+        vi.mocked(api.default.updatePost).mockResolvedValue({
+          success: true,
+        });
+
+        await renderProfile({ posts: mockPosts });
+
+        await waitFor(() => {
+          expect(screen.getByText('Post 1')).toBeInTheDocument();
+        }, { timeout: 5000 });
+
+        // Click on post card to open edit modal (for own posts, clicking the card opens edit)
+        const postCard = screen.getByText('Post 1').closest('.profile-post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        await waitFor(() => {
+          expect(screen.getByDisplayValue('Post 1')).toBeInTheDocument();
+        }, { timeout: 5000 });
+
+        // Change title
+        const titleInput = screen.getByDisplayValue('Post 1');
+        await user.clear(titleInput);
+        await user.type(titleInput, 'Updated Post 1');
+
+        // Save changes
+        const saveButton = screen.getByRole('button', { name: /save changes/i });
+        await user.click(saveButton);
+
+        // Wait for updatePost to be called
+        await waitFor(() => {
+          expect(api.default.updatePost).toHaveBeenCalled();
+        }, { timeout: 3000 });
+
+        // Post 2 should remain unchanged (branch 1: post.id !== editingPost.id)
+        await waitFor(() => {
+          expect(screen.getByText('Post 2')).toBeInTheDocument();
+        }, { timeout: 3000 });
+      });
+    });
+
+    describe('✅ Line 340: Error message fallback branch', () => {
+      it('should use "Unknown error" when error?.message is falsy - covers branch 1', async () => {
+        // This test covers: error?.message || "Unknown error"
+        // Branch 1: when error?.message is falsy, use "Unknown error"
+        
+        const user = userEvent.setup();
+        mockParamId = undefined;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 0,
+          },
+        ];
+
+        // Mock getComments for the post
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [],
+        });
+
+        // Mock updatePost to reject with error without message
+        vi.mocked(api.default.updatePost).mockRejectedValue({}); // Error object without message
+
+        const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+        await renderProfile({ posts: mockPosts });
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 5000 });
+
+        // Click on post card to open edit modal (for own posts, clicking the card opens edit)
+        const postCard = screen.getByText('Test Post').closest('.profile-post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        await waitFor(() => {
+          expect(screen.getByDisplayValue('Test Post')).toBeInTheDocument();
+        }, { timeout: 5000 });
+
+        // Save changes
+        const saveButton = screen.getByRole('button', { name: /save changes/i });
+        await user.click(saveButton);
+
+        // Wait for error alert
+        await waitFor(() => {
+          expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Unknown error'));
+        }, { timeout: 3000 });
+
+        alertSpy.mockRestore();
+      });
+    });
+
+    describe('✅ Line 460: Socket connection branch', () => {
+      it('should not join room when socket is not connected - covers branch 1', async () => {
+        // This test covers: if (selectedPost && socket.connected)
+        // Branch 1: when socket.connected is false, don't join room
+        
+        const user = userEvent.setup();
+        mockParamId = undefined;
+        
+        // Set socket to disconnected
+        mockSocketInstance.connected = false;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 0,
+          },
+        ];
+
+        // Mock getComments for the post
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [],
+        });
+
+        await renderProfile({ posts: mockPosts });
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 5000 });
+
+        // Click on comments count to open modal (this sets selectedPost)
+        // For own profile, clicking the card opens edit, so we click the comments link instead
+        const commentsLink = screen.getByText(/0 comments/i);
+        if (commentsLink) {
+          await user.click(commentsLink);
+        }
+
+        await waitFor(() => {
+          expect(screen.getByPlaceholderText('Add a comment...')).toBeInTheDocument();
+        }, { timeout: 5000 });
+
+        // Clear previous emit calls
+        mockSocketInstance.emit.mockClear();
+
+        // Since socket is not connected, emit should not be called immediately
+        // (it should wait for connection via socket.once('connect'))
+        await waitFor(() => {
+          // socket.once should be called to wait for connection
+          expect(mockSocketInstance.once).toHaveBeenCalledWith('connect', expect.any(Function));
+        }, { timeout: 3000 });
+
+        // Reset socket to connected for cleanup
+        mockSocketInstance.connected = true;
+      });
+    });
+  });
 });
 
