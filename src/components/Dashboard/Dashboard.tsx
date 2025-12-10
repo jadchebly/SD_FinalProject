@@ -9,6 +9,7 @@ import { FaEdit, FaComment } from "react-icons/fa";
 import api from "../../services/api";
 import { getSocket } from "../../services/socket";
 import SuggestedUsersModal from "../SuggestedUsersModal";
+import TimeAgo from "timeago-react";
 
 export default function Dashboard() {
   const { user, getFollowingList, hasSeenSuggested, markSeenSuggested } = useAuth();
@@ -982,7 +983,9 @@ export default function Dashboard() {
                           <div className="comment-content">
                             <div className="comment-header">
                               <span className="comment-username">{comment.user}</span>
-                              <span className="comment-time">{comment.timeAgo || getTimeAgo(comment.createdAt)}</span>
+                              <span className="comment-time">
+                              <TimeAgo datetime={comment.createdAt} live={true} locale="en_US"/>
+                              </span>
                             </div>
                             <p className="comment-text">{comment.text}</p>
                           </div>

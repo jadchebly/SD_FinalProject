@@ -986,20 +986,25 @@ app.get('/api/posts/:id/comments', async (req, res) => {
           createdAtDate = createdAtValue;
           createdAtValue = createdAtDate.toISOString();
         } else if (typeof createdAtValue === 'string') {
-          // If it's already an ISO string, use it as-is
-          if (createdAtValue.includes('T') && (createdAtValue.includes('Z') || createdAtValue.match(/[+-]\d{2}:\d{2}$/))) {
-            // Already in ISO format
+          // PostgreSQL timestamps should always be treated as UTC
+          // If it already has timezone info (Z or +/-offset), parse directly
+          if (createdAtValue.includes('Z') || createdAtValue.match(/[+-]\d{2}:\d{2}$/)) {
+            // Already has timezone info
             createdAtDate = new Date(createdAtValue);
             createdAtValue = createdAtDate.toISOString();
           } else {
-            // Try to parse and convert to ISO
-            createdAtDate = new Date(createdAtValue);
+            // No timezone info - PostgreSQL timestamps are in UTC, so append 'Z' to force UTC parsing
+            // Format: YYYY-MM-DD HH:mm:ss or YYYY-MM-DDTHH:mm:ss
+            const normalizedValue = createdAtValue.includes('T') 
+              ? createdAtValue + 'Z'
+              : createdAtValue.replace(' ', 'T') + 'Z';
+            createdAtDate = new Date(normalizedValue);
             if (!isNaN(createdAtDate.getTime())) {
               createdAtValue = createdAtDate.toISOString();
             } else {
-              // If parsing fails, assume UTC and append 'Z'
-              createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+              // If parsing still fails, try without modification
               createdAtDate = new Date(createdAtValue);
+              createdAtValue = createdAtDate.toISOString();
             }
           }
         } else {
@@ -1017,35 +1022,16 @@ app.get('/api/posts/:id/comments', async (req, res) => {
         createdAtValue = createdAtDate.toISOString();
       }
 
-      // Calculate timeAgo on backend using server time
-      const now = new Date();
-      const diffInSeconds = Math.floor((now.getTime() - createdAtDate.getTime()) / 1000);
-      let timeAgo: string;
-      
-      if (diffInSeconds < 0) {
-        timeAgo = 'just now';
-      } else if (diffInSeconds < 10) {
-        timeAgo = 'just now';
-      } else if (diffInSeconds < 60) {
-        timeAgo = `${diffInSeconds}s ago`;
-      } else if (diffInSeconds < 3600) {
-        const minutes = Math.floor(diffInSeconds / 60);
-        timeAgo = `${minutes}m ago`;
-      } else if (diffInSeconds < 86400) {
-        const hours = Math.floor(diffInSeconds / 3600);
-        timeAgo = `${hours}h ago`;
-      } else {
-        const days = Math.floor(diffInSeconds / 86400);
-        timeAgo = `${days}d ago`;
-      }
+      // Add 1 hour (3600000 ms) to compensate for timezone offset
+      createdAtDate = new Date(createdAtDate.getTime() + 3600000);
+      createdAtValue = createdAtDate.toISOString();
 
       return {
         id: comment.id,
         text: comment.text,
         user: comment.users?.username || 'Unknown',
         userPhoto: comment.users?.avatar_url || null,
-        createdAt: createdAtValue,
-        timeAgo: timeAgo, // Pre-calculated on backend
+        createdAt: createdAtValue, // UTC ISO string with 1 hour added
       };
     }) || [];
 
@@ -1162,27 +1148,9 @@ app.post('/api/posts/:id/comments', async (req, res) => {
       createdAtValue = createdAtDate.toISOString();
     }
 
-    // Calculate timeAgo on backend using server time
-    const now = new Date();
-    const diffInSeconds = Math.floor((now.getTime() - createdAtDate.getTime()) / 1000);
-    let timeAgo: string;
-    
-    if (diffInSeconds < 0) {
-      timeAgo = 'just now';
-    } else if (diffInSeconds < 10) {
-      timeAgo = 'just now';
-    } else if (diffInSeconds < 60) {
-      timeAgo = `${diffInSeconds}s ago`;
-    } else if (diffInSeconds < 3600) {
-      const minutes = Math.floor(diffInSeconds / 60);
-      timeAgo = `${minutes}m ago`;
-    } else if (diffInSeconds < 86400) {
-      const hours = Math.floor(diffInSeconds / 3600);
-      timeAgo = `${hours}h ago`;
-    } else {
-      const days = Math.floor(diffInSeconds / 86400);
-      timeAgo = `${days}d ago`;
-    }
+    // Add 1 hour (3600000 ms) to compensate for timezone offset
+    createdAtDate = new Date(createdAtDate.getTime() + 3600000);
+    createdAtValue = createdAtDate.toISOString();
 
     // Get username and avatar from user data
     const username = userData?.username || 'Unknown';
@@ -1194,17 +1162,16 @@ app.post('/api/posts/:id/comments', async (req, res) => {
       userId: userId,
       username: username,
       hasUserData: !!userData,
-      timeAgo: timeAgo,
-      diffInSeconds: diffInSeconds,
+      createdAt: createdAtValue,
     });
 
+    // Don't calculate timeAgo on backend - let frontend calculate it using device's local time
     const formattedComment = {
       id: comment.id,
       text: comment.text || trimmedText, // Fallback to original text if needed
       user: username,
       userPhoto: userPhoto,
-      createdAt: createdAtValue,
-      timeAgo: timeAgo, // Pre-calculated on backend
+      createdAt: createdAtValue, // UTC ISO string with 1 hour added - frontend will calculate timeAgo
     };
 
     // Verify formatted comment has all required fields before emitting

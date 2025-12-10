@@ -8,6 +8,7 @@ import type { Post, Comment } from '../types/Post';
 import { AiFillLike } from 'react-icons/ai';
 import api from '../services/api';
 import { getSocket } from '../services/socket';
+import TimeAgo from 'timeago-react';
 import './Profile.css';
 import '../components/Dashboard/Dashboard.css';
 
@@ -909,7 +910,9 @@ export default function Profile() {
                       <div className="comment-content">
                         <div className="comment-header">
                           <span className="comment-username">{c.user}</span>
-                          <span className="comment-time">{c.timeAgo || getTimeAgo(c.createdAt)}</span>
+                          <span className="comment-time">
+                            <TimeAgo datetime={c.createdAt} live={true} locale="en_US"/>
+                          </span>
                         </div>
                         <p className="comment-text">{c.text}</p>
                       </div>
