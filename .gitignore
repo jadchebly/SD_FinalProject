@@ -24,4 +24,7 @@ dist-ssr
 *.sw?
 .env
 backend/.env
+
+# Coverage reports
 coverage/
+*.lcov

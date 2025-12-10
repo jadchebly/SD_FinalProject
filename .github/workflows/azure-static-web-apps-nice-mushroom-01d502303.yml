@@ -1,0 +1,122 @@
+name: Azure Static Web Apps CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - main
+  workflow_run:
+    workflows: ["Build and deploy Node.js app to Azure Web App - IEstagram"]
+    types:
+      - completed
+    branches:
+      - main
+
+jobs:
+  build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy Job
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+          lfs: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+      - name: Wait for backend to be ready
+        run: |
+          BACKEND_URL="${{ secrets.VITE_BACKEND_URL_PRODUCTION }}"
+          echo "Waiting for backend to be ready at: $BACKEND_URL"
+          max_attempts=30
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f -s "$BACKEND_URL/health" > /dev/null 2>&1; then
+              echo "Backend is ready!"
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts: Backend not ready yet, waiting 10 seconds..."
+            sleep 10
+          done
+          echo "Warning: Backend health check timed out, but continuing with build..."
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        env:
+          VITE_BACKEND_URL_PRODUCTION: ${{ secrets.VITE_BACKEND_URL_PRODUCTION }}
+          NODE_ENV: production
+        run: |
+          if [ -z "$VITE_BACKEND_URL_PRODUCTION" ]; then
+            echo "❌ ERROR: VITE_BACKEND_URL_PRODUCTION is not set!"
+            exit 1
+          fi
+          echo "✅ VITE_BACKEND_URL_PRODUCTION is set (value masked for security)"
+          echo "   Length: ${#VITE_BACKEND_URL_PRODUCTION} characters"
+          # Verify it's a valid URL format (http:// or https://)
+          if [[ "$VITE_BACKEND_URL_PRODUCTION" == http://* ]] || [[ "$VITE_BACKEND_URL_PRODUCTION" == https://* ]]; then
+            echo "✅ URL format is correct (http:// or https://)"
+          else
+            echo "⚠️  Warning: URL doesn't start with http:// or https://"
+            echo "   Current value starts with: ${VITE_BACKEND_URL_PRODUCTION:0:10}..."
+          fi
+          echo "Building with production environment..."
+          # Verify the env var is available before building
+          echo "Checking environment variables:"
+          echo "  VITE_BACKEND_URL_PRODUCTION length: ${#VITE_BACKEND_URL_PRODUCTION}"
+          echo "  NODE_ENV: $NODE_ENV"
+          # Export to make sure it's available to all child processes
+          export VITE_BACKEND_URL_PRODUCTION="$VITE_BACKEND_URL_PRODUCTION"
+          export NODE_ENV=production
+          # Verify it's exported
+          echo "Exported variables:"
+          env | grep -E "VITE_BACKEND_URL_PRODUCTION|NODE_ENV" || echo "Warning: Variables not in environment"
+          # Create .env.production file to ensure Vite picks it up
+          echo "Creating .env.production file..."
+          echo "VITE_BACKEND_URL_PRODUCTION=$VITE_BACKEND_URL_PRODUCTION" > .env.production
+          echo "NODE_ENV=production" >> .env.production
+          echo ".env.production created"
+          # Build - the env vars should be available to vite build
+          npm run build
+          echo "✅ Build completed - checking if env var was used..."
+          # Check if the built file contains the backend URL (without exposing it)
+          if grep -r "iestagram.*azurewebsites" dist/ > /dev/null 2>&1; then
+            echo "✅ Backend URL found in build output"
+          elif grep -r "localhost:3000" dist/ > /dev/null 2>&1; then
+            echo "❌ ERROR: localhost:3000 found in build - env var not used!"
+            echo "This means VITE_BACKEND_URL_PRODUCTION was not available during build"
+            exit 1
+          else
+            echo "⚠️  Warning: Could not verify backend URL in build output"
+          fi
+      - name: Build And Deploy
+        id: builddeploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_NICE_MUSHROOM_01D502303 }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for Github integrations (i.e. PR comments)
+          action: "upload"
+          ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
+          # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
+          app_location: "/" # App source code path
+          api_location: "" # Api source code path - optional
+          output_location: "dist" # Built app content directory - optional
+          ###### End of Repository/Build Configurations ######
+
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        id: closepullrequest
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_NICE_MUSHROOM_01D502303 }}
+          action: "close"

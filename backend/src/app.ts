@@ -3,12 +3,53 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
-import { supabase, supabaseAdmin } from './config/database';
-import { uploadImageToSupabase, deleteImageFromSupabase } from './services/uploadService';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import { db, dbAdmin } from './config/database';
+import { uploadImageToS3, deleteImageFromS3 } from './services/s3Service';
 
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      
+      // Allow localhost for development
+      if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
+        return callback(null, true);
+      }
+      
+      // Use production URL if in production, otherwise use development URL
+      const isProduction = process.env.NODE_ENV === 'production';
+      const frontendUrl = isProduction 
+        ? process.env.FRONTEND_URL_PRODUCTION 
+        : process.env.FRONTEND_URL;
+      
+      const allowedOrigins = [
+        frontendUrl,
+        'http://localhost:5173',
+        'http://localhost:5174',
+      ].filter(Boolean);
+      
+      // Check exact match first
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      
+      // In production, also allow Azure Static Web Apps domains
+      if (isProduction && origin.includes('.azurestaticapps.net')) {
+        return callback(null, true);
+      }
+      
+      callback(new Error('Not allowed by CORS'));
+    },
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
 const PORT = process.env.PORT || 3000;
 
 // Configure multer for file uploads (store in memory)
@@ -24,24 +65,43 @@ app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     
+    // Allow localhost for development
     if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
       return callback(null, true);
     }
     
+    // Use production URL if in production, otherwise use development URL
+    const isProduction = process.env.NODE_ENV === 'production';
+    const frontendUrl = isProduction 
+      ? process.env.FRONTEND_URL_PRODUCTION 
+      : process.env.FRONTEND_URL;
+    
     const allowedOrigins = [
-      process.env.FRONTEND_URL,
+      frontendUrl,
       'http://localhost:5173',
       'http://localhost:5174',
     ].filter(Boolean);
     
+    // Check exact match first
     if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // In production, also allow Azure Static Web Apps domains
+    // Azure Static Web Apps can have different subdomains (e.g., .1., .2., .3., etc.)
+    if (isProduction && origin.includes('.azurestaticapps.net')) {
       return callback(null, true);
     }
     
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id'],
 }));
+
+// Handle preflight OPTIONS requests explicitly
+app.options('*', cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -51,14 +111,15 @@ app.get('/health', (req, res) => {
 
 app.get('/test-db', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('users').select('count').limit(0);
+    // Test basic connection
+    const { data, error } = await db.from('users').select('id').limit(1);
 
     if (error) {
-      if (error.code === 'PGRST116' || error.message.includes('does not exist')) {
+      if (error.message && (error.message.includes('does not exist') || error.message.includes('relation'))) {
         return res.json({
           success: true,
           database: 'connected',
-          message: 'Supabase connected! (Tables may not be created yet)',
+          message: 'AWS RDS PostgreSQL connected! (Tables may not be created yet)',
         });
       }
       throw error;
@@ -67,7 +128,7 @@ app.get('/test-db', async (req, res) => {
     res.json({
       success: true,
       database: 'connected',
-      message: 'Supabase connection successful!',
+      message: 'AWS RDS PostgreSQL connection successful!',
       data,
     });
   } catch (error) {
@@ -90,8 +151,8 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    console.log('Uploading to Supabase...');
-    const result = await uploadImageToSupabase(req.file);
+    console.log('Uploading to S3...');
+    const result = await uploadImageToS3(req.file);
     console.log('Upload successful:', result.url);
     
     res.json({
@@ -124,7 +185,7 @@ app.post('/api/signup', async (req, res) => {
     console.log('Creating user:', { username, email });
 
     // Check if user already exists
-    const { data: existingUsers } = await supabase
+    const { data: existingUsers } = await db
       .from('users')
       .select('id, email, username')
       .or(`email.eq.${email},username.eq.${username}`);
@@ -147,7 +208,7 @@ app.post('/api/signup', async (req, res) => {
     const passwordHash = password; // TODO: Use bcrypt in production
 
     // Create user in database
-    const { data: newUser, error: createError } = await supabase
+    const { data: newUser, error: createError } = await db
       .from('users')
       .insert({
         id: userId,
@@ -206,7 +267,7 @@ app.post('/api/login', async (req, res) => {
     console.log('Login attempt for:', email);
 
     // Find user by email
-    const { data: user, error: userError } = await supabase
+    const { data: user, error: userError } = await db
       .from('users')
       .select('id, username, email, password_hash, avatar_url')
       .eq('email', email.trim().toLowerCase())
@@ -267,7 +328,7 @@ app.get('/api/me', async (req, res) => {
       return res.status(200).json({ success: true, user: null });
     }
 
-    const { data: user, error } = await supabase
+    const { data: user, error } = await db
       .from('users')
       .select('id, username, email, avatar_url')
       .eq('id', currentUserId)
@@ -309,7 +370,7 @@ app.get('/api/following', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
 
-    const { data: follows, error } = await supabase
+    const { data: follows, error } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', currentUserId);
@@ -350,7 +411,7 @@ app.get('/api/users/suggested', async (req, res) => {
     // Get list of users the current user is following (if logged in)
     let followingIds: string[] = [];
     if (currentUserId) {
-      const { data: follows } = await supabase
+      const { data: follows } = await db
         .from('follows')
         .select('following_id')
         .eq('follower_id', currentUserId);
@@ -359,7 +420,7 @@ app.get('/api/users/suggested', async (req, res) => {
     }
 
     // Fetch candidate users (limit to 100 for efficiency) and filter in JS
-    const { data: usersRaw, error } = await supabaseAdmin
+    const { data: usersRaw, error } = await dbAdmin
       .from('users')
       .select('id, username, avatar_url, email')
       .limit(100);
@@ -391,7 +452,7 @@ app.get('/api/users/:id', async (req, res) => {
     const { id } = req.params;
     const currentUserId = req.headers['x-user-id'] as string;
 
-    const { data: user, error } = await supabase
+    const { data: user, error } = await db
       .from('users')
       .select('id, username, email, avatar_url, created_at')
       .eq('id', id)
@@ -404,7 +465,7 @@ app.get('/api/users/:id', async (req, res) => {
     // Get follow status if current user is logged in
     let isFollowing = false;
     if (currentUserId && currentUserId !== id) {
-      const { data: follow } = await supabase
+      const { data: follow } = await db
         .from('follows')
         .select('follower_id')
         .eq('follower_id', currentUserId)
@@ -414,12 +475,12 @@ app.get('/api/users/:id', async (req, res) => {
     }
 
     // Get follower/following counts
-    const { count: followerCount } = await supabase
+    const { count: followerCount } = await db
       .from('follows')
       .select('*', { count: 'exact', head: true })
       .eq('following_id', id);
 
-    const { count: followingCount } = await supabase
+    const { count: followingCount } = await db
       .from('follows')
       .select('*', { count: 'exact', head: true })
       .eq('follower_id', id);
@@ -457,7 +518,7 @@ app.post('/api/follow/:userId', async (req, res) => {
     }
 
     // Check if already following
-    const { data: existing } = await supabase
+    const { data: existing } = await db
       .from('follows')
       .select('follower_id')
       .eq('follower_id', followerId)
@@ -468,7 +529,7 @@ app.post('/api/follow/:userId', async (req, res) => {
       return res.status(400).json({ error: 'Already following this user' });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('follows')
       .insert({
         follower_id: followerId,
@@ -499,7 +560,7 @@ app.delete('/api/follow/:userId', async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('follows')
       .delete()
       .eq('follower_id', followerId)
@@ -539,7 +600,7 @@ app.put('/api/users/:id/avatar', async (req, res) => {
     
     console.log(`Updating avatar for user ${id}, avatar_url length: ${normalizedAvatarUrl?.length || 0}`);
 
-    const { data: updatedUser, error } = await supabase
+    const { data: updatedUser, error } = await db
       .from('users')
       .update({ avatar_url: normalizedAvatarUrl })
       .eq('id', id)
@@ -547,7 +608,7 @@ app.put('/api/users/:id/avatar', async (req, res) => {
       .single();
 
     if (error) {
-      console.error('Supabase update error:', error);
+      console.error('Database update error:', error);
       throw error;
     }
 
@@ -582,7 +643,7 @@ app.get('/api/users/:id/followers', async (req, res) => {
     const currentUserId = req.headers['x-user-id'] as string;
 
     // Get all users who follow this user
-    const { data: follows, error: followsError } = await supabase
+    const { data: follows, error: followsError } = await db
       .from('follows')
       .select('follower_id')
       .eq('following_id', id);
@@ -598,7 +659,7 @@ app.get('/api/users/:id/followers', async (req, res) => {
     }
 
     // Get user details for followers
-    const { data: users, error: usersError } = await supabase
+    const { data: users, error: usersError } = await db
       .from('users')
       .select('id, username, email, avatar_url')
       .in('id', followerIds);
@@ -610,7 +671,7 @@ app.get('/api/users/:id/followers', async (req, res) => {
     // Get follow status for each user (if current user is logged in)
     let followingIds = new Set<string>();
     if (currentUserId) {
-      const { data: currentUserFollows } = await supabase
+      const { data: currentUserFollows } = await db
         .from('follows')
         .select('following_id')
         .eq('follower_id', currentUserId)
@@ -644,7 +705,7 @@ app.get('/api/users/:id/following', async (req, res) => {
     const currentUserId = req.headers['x-user-id'] as string;
 
     // Get all users this user follows
-    const { data: follows, error: followsError } = await supabase
+    const { data: follows, error: followsError } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', id);
@@ -660,7 +721,7 @@ app.get('/api/users/:id/following', async (req, res) => {
     }
 
     // Get user details for following
-    const { data: users, error: usersError } = await supabase
+    const { data: users, error: usersError } = await db
       .from('users')
       .select('id, username, email, avatar_url')
       .in('id', followingIds);
@@ -673,7 +734,7 @@ app.get('/api/users/:id/following', async (req, res) => {
     // But we need to check if current user follows them
     let currentUserFollowingIds = new Set<string>();
     if (currentUserId) {
-      const { data: currentUserFollows } = await supabase
+      const { data: currentUserFollows } = await db
         .from('follows')
         .select('following_id')
         .eq('follower_id', currentUserId)
@@ -710,7 +771,7 @@ app.get('/api/feed', async (req, res) => {
     }
 
     // Get list of users being followed
-    const { data: follows } = await supabase
+    const { data: follows } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', userId);
@@ -720,7 +781,7 @@ app.get('/api/feed', async (req, res) => {
     const userIds = [...followingIds, userId];
 
     // Get posts from followed users + self
-    const { data: posts, error: postsError } = await supabase
+    const { data: posts, error: postsError } = await db
       .from('posts')
       .select(`
         *,
@@ -740,13 +801,13 @@ app.get('/api/feed', async (req, res) => {
 
     // Get likes for each post
     const postIds = posts?.map(p => p.id) || [];
-    const { data: likes } = await supabase
+    const { data: likes } = await db
       .from('likes')
       .select('user_id, post_id')
       .in('post_id', postIds);
 
     // Get comments count for each post
-    const { data: comments } = await supabase
+    const { data: comments } = await db
       .from('comments')
       .select('post_id')
       .in('post_id', postIds);
@@ -791,7 +852,7 @@ app.post('/api/posts/:id/like', async (req, res) => {
     }
 
     // Check if already liked
-    const { data: existing } = await supabase
+    const { data: existing } = await db
       .from('likes')
       .select('user_id')
       .eq('user_id', userId)
@@ -802,7 +863,7 @@ app.post('/api/posts/:id/like', async (req, res) => {
       return res.json({ success: true, message: 'Already liked' });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('likes')
       .insert({
         user_id: userId,
@@ -812,6 +873,26 @@ app.post('/api/posts/:id/like', async (req, res) => {
     if (error) {
       throw error;
     }
+
+    // Get updated like count and likers
+    const { data: likes } = await db
+      .from('likes')
+      .select('user_id')
+      .eq('post_id', id);
+
+    const likers = likes?.map((l: any) => l.user_id) || [];
+
+    // Emit real-time update to all users viewing this post
+    const room = `post-${id}`;
+    const socketsInRoom = await io.in(room).fetchSockets();
+    console.log(`Emitting like-updated to room ${room}, ${socketsInRoom.length} socket(s) in room`);
+    io.to(room).emit('like-updated', {
+      postId: id,
+      likes: likers.length,
+      likers: likers,
+      action: 'like',
+      userId: userId,
+    });
 
     res.json({ success: true, message: 'Post liked' });
   } catch (error: any) {
@@ -833,7 +914,7 @@ app.delete('/api/posts/:id/like', async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('likes')
       .delete()
       .eq('user_id', userId)
@@ -842,6 +923,26 @@ app.delete('/api/posts/:id/like', async (req, res) => {
     if (error) {
       throw error;
     }
+
+    // Get updated like count and likers
+    const { data: likes } = await db
+      .from('likes')
+      .select('user_id')
+      .eq('post_id', id);
+
+    const likers = likes?.map((l: any) => l.user_id) || [];
+
+    // Emit real-time update to all users viewing this post
+    const room = `post-${id}`;
+    const socketsInRoom = await io.in(room).fetchSockets();
+    console.log(`Emitting like-updated to room ${room}, ${socketsInRoom.length} socket(s) in room`);
+    io.to(room).emit('like-updated', {
+      postId: id,
+      likes: likers.length,
+      likers: likers,
+      action: 'unlike',
+      userId: userId,
+    });
 
     res.json({ success: true, message: 'Post unliked' });
   } catch (error: any) {
@@ -858,7 +959,7 @@ app.get('/api/posts/:id/comments', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data: comments, error } = await supabase
+    const { data: comments, error } = await db
       .from('comments')
       .select(`
         *,
@@ -875,13 +976,78 @@ app.get('/api/posts/:id/comments', async (req, res) => {
       throw error;
     }
 
-    const formattedComments = comments?.map(comment => ({
-      id: comment.id,
-      text: comment.text,
-      user: comment.users?.username || 'Unknown',
-      userPhoto: comment.users?.avatar_url || null,
-      createdAt: comment.created_at,
-    })) || [];
+    const formattedComments = comments?.map(comment => {
+      // Format createdAt to ensure it's a valid ISO string
+      let createdAtValue = comment.created_at;
+      let createdAtDate: Date;
+      
+      if (createdAtValue) {
+        if (createdAtValue instanceof Date) {
+          createdAtDate = createdAtValue;
+          createdAtValue = createdAtDate.toISOString();
+        } else if (typeof createdAtValue === 'string') {
+          // If it's already an ISO string, use it as-is
+          if (createdAtValue.includes('T') && (createdAtValue.includes('Z') || createdAtValue.match(/[+-]\d{2}:\d{2}$/))) {
+            // Already in ISO format
+            createdAtDate = new Date(createdAtValue);
+            createdAtValue = createdAtDate.toISOString();
+          } else {
+            // Try to parse and convert to ISO
+            createdAtDate = new Date(createdAtValue);
+            if (!isNaN(createdAtDate.getTime())) {
+              createdAtValue = createdAtDate.toISOString();
+            } else {
+              // If parsing fails, assume UTC and append 'Z'
+              createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+              createdAtDate = new Date(createdAtValue);
+            }
+          }
+        } else {
+          // If it's another type, try to convert
+          createdAtDate = new Date(createdAtValue);
+          if (!isNaN(createdAtDate.getTime())) {
+            createdAtValue = createdAtDate.toISOString();
+          } else {
+            createdAtDate = new Date();
+            createdAtValue = createdAtDate.toISOString();
+          }
+        }
+      } else {
+        createdAtDate = new Date();
+        createdAtValue = createdAtDate.toISOString();
+      }
+
+      // Calculate timeAgo on backend using server time
+      const now = new Date();
+      const diffInSeconds = Math.floor((now.getTime() - createdAtDate.getTime()) / 1000);
+      let timeAgo: string;
+      
+      if (diffInSeconds < 0) {
+        timeAgo = 'just now';
+      } else if (diffInSeconds < 10) {
+        timeAgo = 'just now';
+      } else if (diffInSeconds < 60) {
+        timeAgo = `${diffInSeconds}s ago`;
+      } else if (diffInSeconds < 3600) {
+        const minutes = Math.floor(diffInSeconds / 60);
+        timeAgo = `${minutes}m ago`;
+      } else if (diffInSeconds < 86400) {
+        const hours = Math.floor(diffInSeconds / 3600);
+        timeAgo = `${hours}h ago`;
+      } else {
+        const days = Math.floor(diffInSeconds / 86400);
+        timeAgo = `${days}d ago`;
+      }
+
+      return {
+        id: comment.id,
+        text: comment.text,
+        user: comment.users?.username || 'Unknown',
+        userPhoto: comment.users?.avatar_url || null,
+        createdAt: createdAtValue,
+        timeAgo: timeAgo, // Pre-calculated on backend
+      };
+    }) || [];
 
     res.json({
       success: true,
@@ -911,36 +1077,172 @@ app.post('/api/posts/:id/comments', async (req, res) => {
       return res.status(400).json({ error: 'Comment text is required' });
     }
 
-    const { data: comment, error } = await supabase
+    // Insert the comment into the database
+    const trimmedText = text.trim();
+    console.log('💬 Inserting comment into database:', {
+      postId: id,
+      userId: userId,
+      textLength: trimmedText.length,
+      dbHost: process.env.DB_HOST || 'not set',
+    });
+    
+    const { data: insertedComment, error: insertError } = await db
       .from('comments')
       .insert({
         post_id: id,
         user_id: userId,
-        text: text.trim(),
+        text: trimmedText,
       })
-      .select(`
-        *,
-        users:user_id (
-          id,
-          username,
-          avatar_url
-        )
-      `)
+      .select('id, text, created_at')
       .single();
 
-    if (error) {
-      throw error;
+    if (insertError || !insertedComment) {
+      console.error('Failed to insert comment:', insertError);
+      throw insertError || new Error('Failed to create comment');
     }
+
+    // Handle case where .single() might return an array (extract first element)
+    const comment = Array.isArray(insertedComment) ? insertedComment[0] : insertedComment;
+    
+    if (!comment) {
+      console.error('Inserted comment is null or empty:', insertedComment);
+      throw new Error('Comment insert succeeded but returned no data');
+    }
+
+    // Verify we have the required fields
+    if (!comment.id || !comment.text) {
+      console.error('Inserted comment missing required fields:', comment);
+      throw new Error('Comment insert succeeded but missing required fields');
+    }
+    
+    console.log('✅ Comment inserted successfully:', {
+      id: comment.id,
+      text: comment.text,
+      hasId: !!comment.id,
+      hasText: !!comment.text,
+    });
+
+    // Fetch user data separately to ensure we have the correct username
+    const { data: userData, error: userError } = await db
+      .from('users')
+      .select('username, avatar_url')
+      .eq('id', userId)
+      .single();
+
+    if (userError) {
+      console.error('Failed to fetch user data:', userError);
+      // Continue even if user fetch fails, we'll use fallback
+    }
+
+    // Format comment for response - ensure createdAt is a valid ISO string
+    let createdAtValue = comment.created_at;
+    let createdAtDate: Date;
+    
+    if (createdAtValue) {
+      // Convert to Date object for calculations
+      if (createdAtValue instanceof Date) {
+        createdAtDate = createdAtValue;
+        createdAtValue = createdAtDate.toISOString();
+      } else if (typeof createdAtValue === 'string') {
+        createdAtDate = new Date(createdAtValue);
+        // If no timezone info, assume UTC and append 'Z'
+        if (!createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/)) {
+          createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+          createdAtDate = new Date(createdAtValue);
+        } else {
+          createdAtValue = createdAtDate.toISOString();
+        }
+      } else {
+        createdAtDate = new Date(createdAtValue);
+        createdAtValue = createdAtDate.toISOString();
+      }
+    } else {
+      // Fallback to current time if missing
+      createdAtDate = new Date();
+      createdAtValue = createdAtDate.toISOString();
+    }
+
+    // Calculate timeAgo on backend using server time
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - createdAtDate.getTime()) / 1000);
+    let timeAgo: string;
+    
+    if (diffInSeconds < 0) {
+      timeAgo = 'just now';
+    } else if (diffInSeconds < 10) {
+      timeAgo = 'just now';
+    } else if (diffInSeconds < 60) {
+      timeAgo = `${diffInSeconds}s ago`;
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60);
+      timeAgo = `${minutes}m ago`;
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600);
+      timeAgo = `${hours}h ago`;
+    } else {
+      const days = Math.floor(diffInSeconds / 86400);
+      timeAgo = `${days}d ago`;
+    }
+
+    // Get username and avatar from user data
+    const username = userData?.username || 'Unknown';
+    const userPhoto = userData?.avatar_url || null;
+
+    // Log for debugging
+    console.log('Comment created successfully:', {
+      commentId: comment.id,
+      userId: userId,
+      username: username,
+      hasUserData: !!userData,
+      timeAgo: timeAgo,
+      diffInSeconds: diffInSeconds,
+    });
+
+    const formattedComment = {
+      id: comment.id,
+      text: comment.text || trimmedText, // Fallback to original text if needed
+      user: username,
+      userPhoto: userPhoto,
+      createdAt: createdAtValue,
+      timeAgo: timeAgo, // Pre-calculated on backend
+    };
+
+    // Verify formatted comment has all required fields before emitting
+    if (!formattedComment.id || !formattedComment.text) {
+      console.error('Formatted comment missing required fields:', formattedComment);
+      console.error('Inserted comment was:', insertedComment);
+      throw new Error('Comment formatting failed - missing required fields');
+    }
+
+    // Emit real-time update to all users viewing this post (Observer Pattern via Socket.io rooms)
+    const room = `post-${id}`;
+    const socketsInRoom = await io.in(room).fetchSockets();
+    console.log(`Emitting new-comment to room ${room}, ${socketsInRoom.length} socket(s) in room`);
+    
+    // Create the event payload with explicit field names
+    const eventPayload = {
+      postId: String(id),
+      comment: {
+        id: String(formattedComment.id),
+        text: String(formattedComment.text),
+        user: String(formattedComment.user),
+        userPhoto: formattedComment.userPhoto,
+        createdAt: String(formattedComment.createdAt),
+      },
+    };
+    
+    console.log('Event payload being emitted:', JSON.stringify(eventPayload, null, 2));
+    console.log('Comment object keys:', Object.keys(eventPayload.comment));
+    console.log('Comment id:', eventPayload.comment.id);
+    console.log('Comment text:', eventPayload.comment.text);
+    
+    io.to(room).emit('new-comment', eventPayload);
+    
+    console.log(`Broadcasted comment to ${socketsInRoom.length} observer(s) in room ${room}`);
 
     res.json({
       success: true,
-      comment: {
-        id: comment.id,
-        text: comment.text,
-        user: comment.users?.username || 'Unknown',
-        userPhoto: comment.users?.avatar_url || null,
-        createdAt: comment.created_at,
-      },
+      comment: formattedComment,
     });
   } catch (error: any) {
     console.error('Add comment error:', error);
@@ -961,7 +1263,7 @@ app.get('/api/users/suggested', async (req, res) => {
     }
 
     // Get list of users being followed
-    const { data: follows } = await supabase
+    const { data: follows } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', currentUserId);
@@ -971,7 +1273,7 @@ app.get('/api/users/suggested', async (req, res) => {
     const excludeIds = [...followingIds, currentUserId];
 
     // Get all users
-    const { data: allUsers, error } = await supabase
+    const { data: allUsers, error } = await db
       .from('users')
       .select('id, username, email, avatar_url');
 
@@ -1014,7 +1316,7 @@ app.get('/api/users/search/:query', async (req, res) => {
       return res.json({ success: true, users: [] });
     }
 
-    const { data: users, error } = await supabase
+    const { data: users, error } = await db
       .from('users')
       .select('id, username, avatar_url')
       .ilike('username', `%${query}%`)
@@ -1026,7 +1328,7 @@ app.get('/api/users/search/:query', async (req, res) => {
 
     // Get follow status for each user
     const userIds = users?.map(u => u.id) || [];
-    const { data: follows } = await supabase
+    const { data: follows } = await db
       .from('follows')
       .select('following_id')
       .eq('follower_id', currentUserId || '')
@@ -1060,7 +1362,7 @@ app.get('/api/users/suggested', async (req, res) => {
     // Get list of users the current user is following (if logged in)
     let followingIds: string[] = [];
     if (currentUserId) {
-      const { data: follows } = await supabase
+      const { data: follows } = await db
         .from('follows')
         .select('following_id')
         .eq('follower_id', currentUserId);
@@ -1069,7 +1371,7 @@ app.get('/api/users/suggested', async (req, res) => {
     }
 
     // Fetch candidate users (limit to 100 for efficiency) and filter in JS
-    const { data: usersRaw, error } = await supabaseAdmin
+    const { data: usersRaw, error } = await dbAdmin
       .from('users')
       .select('id, username, avatar_url, email')
       .limit(100);
@@ -1102,7 +1404,7 @@ app.get('/api/posts', async (req, res) => {
     const userId = req.query.user_id as string;
     const currentUserId = req.headers['x-user-id'] as string;
 
-    let query = supabaseAdmin
+    let query = dbAdmin
       .from('posts')
       .select(`
         *,
@@ -1134,13 +1436,13 @@ app.get('/api/posts', async (req, res) => {
 
     // Get likes for each post (using admin client to bypass RLS)
     const postIds = posts.map(p => p.id);
-    const { data: likes } = await supabaseAdmin
+    const { data: likes } = await dbAdmin
       .from('likes')
       .select('user_id, post_id')
       .in('post_id', postIds);
 
     // Get comments count for each post (using admin client to bypass RLS)
-    const { data: comments } = await supabaseAdmin
+    const { data: comments } = await dbAdmin
       .from('comments')
       .select('post_id')
       .in('post_id', postIds);
@@ -1202,7 +1504,7 @@ app.post('/api/posts', async (req, res) => {
 
     let userId = user_id;
     
-    const { data: existingUser, error: userCheckError } = await supabase
+    const { data: existingUser, error: userCheckError } = await db
       .from('users')
       .select('id')
       .eq('id', user_id)
@@ -1211,7 +1513,7 @@ app.post('/api/posts', async (req, res) => {
     if (!existingUser && username) {
       console.log('User not found, creating user entry...');
       try {
-        const { data: newUser, error: createUserError } = await supabase
+        const { data: newUser, error: createUserError } = await db
           .from('users')
           .insert({
             id: user_id,
@@ -1224,7 +1526,7 @@ app.post('/api/posts', async (req, res) => {
 
         if (createUserError) {
           console.error('Error creating user:', createUserError);
-          const { data: userByUsername } = await supabase
+          const { data: userByUsername } = await db
             .from('users')
             .select('id')
             .eq('username', username)
@@ -1270,7 +1572,7 @@ app.post('/api/posts', async (req, res) => {
 
     console.log('Inserting post with data:', { ...insertData, image_url: insertData.image_url ? 'present' : 'null', video_url: insertData.video_url ? 'present' : 'null' });
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('posts')
       .insert(insertData)
       .select()
@@ -1303,9 +1605,86 @@ app.post('/api/posts', async (req, res) => {
 
     console.log('Post created successfully:', data.id);
 
+    // Handle case where .single() might return an array
+    const post = Array.isArray(data) ? data[0] : data;
+    
+    if (!post) {
+      throw new Error('Post creation succeeded but returned no data');
+    }
+
+    // Get user info for the post
+    const { data: userData } = await db
+      .from('users')
+      .select('username, avatar_url')
+      .eq('id', userId)
+      .single();
+
+    // Format createdAt to ISO string
+    let createdAtValue = post.created_at;
+    if (createdAtValue instanceof Date) {
+      createdAtValue = createdAtValue.toISOString();
+    } else if (typeof createdAtValue === 'string') {
+      if (!createdAtValue.includes('T') || (!createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/))) {
+        const dateObj = new Date(createdAtValue);
+        if (!isNaN(dateObj.getTime())) {
+          createdAtValue = dateObj.toISOString();
+        } else {
+          createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+        }
+      }
+    }
+
+    // Format the post like the feed endpoint does
+    const formattedPost = {
+      id: post.id,
+      title: post.title,
+      content: post.content,
+      type: post.type,
+      image_url: post.image_url,
+      video_url: post.video_url,
+      created_at: createdAtValue,
+      user_id: post.user_id,
+      user: userData?.username || username || 'Unknown',
+      likes: 0,
+      likers: [],
+      commentsCount: 0,
+      hasLiked: false,
+    };
+
+    // Get all followers of the post creator
+    const { data: followers } = await db
+      .from('follows')
+      .select('follower_id')
+      .eq('following_id', userId);
+
+    const followerIds = followers?.map(f => f.follower_id) || [];
+    
+    // Also include the post creator themselves so they see their own post
+    const userIdsToNotify = [...new Set([...followerIds, userId])];
+
+    console.log(`📢 Broadcasting new post to ${userIdsToNotify.length} user(s):`, {
+      postId: post.id,
+      authorId: userId,
+      authorUsername: userData?.username || username,
+      followers: followerIds.length,
+    });
+
+    // Emit new post to all followers and the creator
+    // We'll use a user-specific room pattern: 'user-{userId}'
+    userIdsToNotify.forEach(userIdToNotify => {
+      io.to(`user-${userIdToNotify}`).emit('new-post', {
+        post: formattedPost,
+      });
+    });
+
+    // Also broadcast to a general feed room for users who are on the dashboard
+    io.to('feed').emit('new-post', {
+      post: formattedPost,
+    });
+
     res.json({
       success: true,
-      post: data,
+      post: post,
     });
   } catch (error: any) {
     console.error('Create post error:', error);
@@ -1356,7 +1735,7 @@ app.put('/api/posts/:id', async (req, res) => {
       return res.status(400).json({ error: 'Content cannot be empty' });
     }
 
-    const { data: post, error: fetchError } = await supabaseAdmin
+    const { data: post, error: fetchError } = await dbAdmin
       .from('posts')
       .select('id, user_id')
       .eq('id', id)
@@ -1378,7 +1757,7 @@ app.put('/api/posts/:id', async (req, res) => {
     }
 
     // Update the post (using admin client to bypass RLS)
-    const { data: updatedPosts, error: updateError } = await supabaseAdmin
+    const { data: updatedPosts, error: updateError } = await dbAdmin
       .from('posts')
       .update({
         title: trimmedTitle,
@@ -1435,12 +1814,11 @@ app.delete('/api/posts/:id', async (req, res) => {
     }
 
     console.log('🗑️ Attempting to delete post:', id);
-    console.log('🗑️ Using admin client (bypasses RLS):', !!supabaseAdmin);
-    console.log('🗑️ Service role key present:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+    console.log('🗑️ Using admin client:', !!dbAdmin);
 
     // First, get the post to check ownership and get image URL (using admin client to bypass RLS)
     console.log('🗑️ Fetching post from database using admin client...');
-    const { data: post, error: fetchError } = await supabaseAdmin
+    const { data: post, error: fetchError } = await dbAdmin
       .from('posts')
       .select('id, user_id, image_url, title')
       .eq('id', id)
@@ -1476,7 +1854,7 @@ app.delete('/api/posts/:id', async (req, res) => {
     if (post.image_url) {
       console.log('Deleting associated image:', post.image_url);
       try {
-        await deleteImageFromSupabase(post.image_url);
+        await deleteImageFromS3(post.image_url);
         console.log('Image deletion completed successfully');
       } catch (error: any) {
         console.error('Failed to delete image from storage:', error);
@@ -1491,7 +1869,7 @@ app.delete('/api/posts/:id', async (req, res) => {
     // - All comments on this post (via ON DELETE CASCADE)
     // - All likes on this post (via ON DELETE CASCADE)
     console.log('🗑️ Deleting post from database using admin client...');
-    const { data: deletedData, error: deleteError } = await supabaseAdmin
+    const { data: deletedData, error: deleteError } = await dbAdmin
       .from('posts')
       .delete()
       .eq('id', id)
@@ -1509,12 +1887,12 @@ app.delete('/api/posts/:id', async (req, res) => {
     console.log('✅ Deleted rows:', deletedData?.length || 0);
 
     // Verify cascading deletes worked (optional - for logging)
-    const { count: remainingComments } = await supabaseAdmin
+    const { count: remainingComments } = await dbAdmin
       .from('comments')
       .select('*', { count: 'exact', head: true })
       .eq('post_id', id);
 
-    const { count: remainingLikes } = await supabaseAdmin
+    const { count: remainingLikes } = await dbAdmin
       .from('likes')
       .select('*', { count: 'exact', head: true })
       .eq('post_id', id);
@@ -1531,7 +1909,7 @@ app.delete('/api/posts/:id', async (req, res) => {
     console.log('✅ Verification: Checking if post still exists...');
 
     // Double-check that post is actually deleted (using admin client)
-    const { data: verifyPost } = await supabaseAdmin
+    const { data: verifyPost } = await dbAdmin
       .from('posts')
       .select('id')
       .eq('id', id)
@@ -1559,8 +1937,72 @@ app.delete('/api/posts/:id', async (req, res) => {
   }
 });
 
+// Global error handler (must be last)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Global error handler:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal server error',
+    details: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+  });
+});
+
+// Socket.io connection handling
+io.on('connection', (socket) => {
+  console.log('Socket.io client connected:', socket.id, 'transport:', socket.conn.transport.name);
+
+  // Join user-specific room for receiving new posts from people they follow
+  socket.on('join-user', (userId: string) => {
+    if (userId) {
+      const room = `user-${userId}`;
+      socket.join(room);
+      console.log(`Socket ${socket.id} joined user room: ${room}`);
+    }
+  });
+
+  // Join feed room for general feed updates
+  socket.on('join-feed', () => {
+    socket.join('feed');
+    console.log(`Socket ${socket.id} joined feed room`);
+  });
+
+  // Leave feed room
+  socket.on('leave-feed', () => {
+    socket.leave('feed');
+    console.log(`Socket ${socket.id} left feed room`);
+  });
+
+  // Join room for a specific post to receive updates
+  socket.on('join-post', (postId: string) => {
+    if (postId) {
+      const room = `post-${postId}`;
+      socket.join(room);
+      console.log(`Socket ${socket.id} joined room: ${room}`);
+      // Verify room membership
+      const rooms = Array.from(socket.rooms);
+      console.log(`Socket ${socket.id} is now in rooms:`, rooms);
+    }
+  });
+
+  // Leave room when user closes the post
+  socket.on('leave-post', (postId: string) => {
+    if (postId) {
+      socket.leave(`post-${postId}`);
+      console.log(`Socket ${socket.id} left room: post-${postId}`);
+    }
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('Socket.io client disconnected:', socket.id, 'reason:', reason);
+  });
+
+  socket.on('error', (error) => {
+    console.error('Socket.io error:', error);
+  });
+});
+
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
+  httpServer.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log(`Health check: http://localhost:${PORT}/health`);
     console.log(`Database test: http://localhost:${PORT}/test-db`);

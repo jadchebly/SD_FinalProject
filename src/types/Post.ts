@@ -4,6 +4,7 @@ export type Comment = {
   user: string;
   userPhoto?: string;
   createdAt: string; // ISO string for localStorage
+  timeAgo?: string; // Pre-calculated time ago string from backend
 };
 
 export type Post = {

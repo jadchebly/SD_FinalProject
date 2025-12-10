@@ -7,6 +7,7 @@ import { GiEgyptianProfile } from "react-icons/gi";
 import { useAuth } from "../../contexts/AuthContext";
 import { FaEdit, FaComment } from "react-icons/fa";
 import api from "../../services/api";
+import { getSocket } from "../../services/socket";
 import SuggestedUsersModal from "../SuggestedUsersModal";
 
 export default function Dashboard() {
@@ -25,6 +26,45 @@ export default function Dashboard() {
   const [showSuggestedUsers, setShowSuggestedUsers] = useState(false);
   const [shouldFocusComment, setShouldFocusComment] = useState(false);
   const commentInputRef = useRef<HTMLInputElement>(null);
+
+  // Initialize socket connection on mount and join rooms for feed updates
+  useEffect(() => {
+    const socket = getSocket();
+    
+    // Join user-specific room and feed room for real-time post updates
+    const setupFeedRooms = () => {
+      if (socket.connected && user) {
+        // Join user-specific room to receive posts from people we follow
+        socket.emit('join-user', user.id);
+        // Join general feed room
+        socket.emit('join-feed');
+        console.log('Joined feed rooms for user:', user.id);
+      }
+    };
+
+    // Join rooms for all posts in the feed so we can receive updates even when modal isn't open
+    const joinAllPostRooms = () => {
+      if (socket.connected && posts.length > 0) {
+        posts.forEach(post => {
+          socket.emit('join-post', post.id);
+        });
+      }
+    };
+
+    if (socket.connected) {
+      setupFeedRooms();
+      joinAllPostRooms();
+    } else {
+      socket.once('connect', () => {
+        setupFeedRooms();
+        joinAllPostRooms();
+      });
+    }
+
+    return () => {
+      // Don't disconnect on unmount, keep connection alive
+    };
+  }, [posts, user]);
 
   // Load posts from API feed
   const fetchFeed = async () => {
@@ -50,6 +90,8 @@ export default function Dashboard() {
           likes: p.likes || 0,
           likers: p.likers || [],
           comments: [], // Will be loaded separately if needed
+          // Store initial comment count for display
+          _initialCommentCount: p.commentsCount || 0,
         }));
         setPosts(transformedPosts);
       }
@@ -142,13 +184,29 @@ export default function Dashboard() {
       try {
         const response = await api.getComments(selectedPost.id);
         if (response.success && response.comments) {
-          const formattedComments: Comment[] = response.comments.map((c: any) => ({
-            id: c.id,
-            text: c.text,
-            user: c.user,
-            userPhoto: c.userPhoto || undefined,
-            createdAt: c.createdAt,
-          }));
+          const formattedComments: Comment[] = response.comments.map((c: any) => {
+            // Ensure createdAt is properly formatted
+            let createdAtValue = c.createdAt || c.created_at;
+            if (!createdAtValue) {
+              createdAtValue = new Date().toISOString();
+            } else if (typeof createdAtValue === 'string') {
+              // If no timezone info, assume UTC and append 'Z'
+              if (!createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/)) {
+                createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+              }
+            } else {
+              createdAtValue = new Date(createdAtValue).toISOString();
+            }
+
+            return {
+              id: c.id,
+              text: c.text || '',
+              user: c.user || 'Unknown',
+              userPhoto: c.userPhoto || undefined,
+              createdAt: createdAtValue,
+              timeAgo: c.timeAgo, // Use backend-calculated timeAgo if available
+            };
+          });
           
           setPosts((prevPosts) => {
             return prevPosts.map((post) => {
@@ -174,22 +232,291 @@ export default function Dashboard() {
     loadComments();
   }, [selectedPost?.id]);
 
-  const getTimeAgo = (createdAt: string): string => {
-    const now = new Date();
-    const postDate = new Date(createdAt);
-    const diffInSeconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
+  // Socket.io real-time updates
+  useEffect(() => {
+    const socket = getSocket();
 
-    if (diffInSeconds < 60) {
-      return `${diffInSeconds}s ago`;
-    } else if (diffInSeconds < 3600) {
-      const minutes = Math.floor(diffInSeconds / 60);
-      return `${minutes}m ago`;
-    } else if (diffInSeconds < 86400) {
-      const hours = Math.floor(diffInSeconds / 3600);
-      return `${hours}h ago`;
-    } else {
-      const days = Math.floor(diffInSeconds / 86400);
-      return `${days}d ago`;
+    // Wait for connection before joining rooms
+    const setupSocket = () => {
+      const joinRoom = () => {
+        if (selectedPost && socket.connected) {
+          socket.emit('join-post', selectedPost.id);
+          console.log('Joined post room:', selectedPost.id);
+        }
+      };
+
+      if (socket.connected) {
+        joinRoom();
+      } else {
+        socket.once('connect', joinRoom);
+        // Also try after a short delay in case connection is in progress
+        setTimeout(() => {
+          if (socket.connected) {
+            joinRoom();
+          }
+        }, 100);
+      }
+    };
+
+    setupSocket();
+
+    // Listen for new comments
+    const handleNewComment = (data: { postId: string; comment: Comment | any }) => {
+      console.log('Received new-comment event:', data);
+      
+      // Validate data structure
+      if (!data || !data.comment) {
+        console.error('Invalid comment data received - missing comment object:', data);
+        return;
+      }
+
+      const commentData = data.comment;
+      
+      // Log what we received for debugging
+      console.log('Comment data received:', {
+        hasId: !!commentData.id,
+        hasText: !!commentData.text,
+        hasUser: !!commentData.user,
+        keys: Object.keys(commentData),
+        fullData: commentData,
+      });
+      
+      // If we're completely missing the comment object, skip it
+      if (!commentData || (typeof commentData !== 'object')) {
+        console.error('Invalid comment data received - not an object:', commentData);
+        return;
+      }
+      
+      // Format the comment date - ensure it's a valid ISO string
+      let createdAtValue = commentData.createdAt;
+      if (!createdAtValue) {
+        createdAtValue = new Date().toISOString();
+      } else if (typeof createdAtValue === 'string') {
+        // If no timezone info, assume UTC and append 'Z'
+        if (!createdAtValue.includes('Z') && !createdAtValue.match(/[+-]\d{2}:\d{2}$/)) {
+          createdAtValue = createdAtValue.replace(' ', 'T') + 'Z';
+        }
+      } else {
+        // If it's not a string, convert to ISO string
+        createdAtValue = new Date(createdAtValue).toISOString();
+      }
+
+      // Create formatted comment with fallbacks for missing fields
+      const formattedComment: Comment = {
+        id: commentData.id || `temp-${Date.now()}`, // Fallback ID if missing
+        text: commentData.text || '', // Fallback to empty string if missing
+        user: commentData.user || 'Unknown',
+        userPhoto: commentData.userPhoto || undefined,
+        createdAt: createdAtValue,
+      };
+
+      // If we're missing critical fields, log warning but still try to use it
+      if (!commentData.id || !commentData.text) {
+        console.warn('Comment missing some fields, using fallbacks:', {
+          received: commentData,
+          formatted: formattedComment,
+        });
+      }
+
+      console.log('Formatted comment:', formattedComment);
+
+      // Update selectedPost if it's the same post
+      if (selectedPost && selectedPost.id === data.postId) {
+        setSelectedPost((prev) => {
+          if (!prev || prev.id !== data.postId) return prev;
+          // Check if comment already exists (avoid duplicates)
+          const exists = prev.comments?.some(c => c.id === formattedComment.id);
+          if (exists) return prev;
+          return {
+            ...prev,
+            comments: [...(prev.comments || []), formattedComment],
+          };
+        });
+      }
+
+      // Update posts array (always update if post exists in feed)
+      setPosts((prevPosts) => {
+        return prevPosts.map((post) => {
+          if (post.id === data.postId) {
+            const exists = post.comments?.some(c => c.id === formattedComment.id);
+            if (exists) return post;
+            // If comments array was empty, initialize it
+            const currentComments = post.comments || [];
+            return {
+              ...post,
+              comments: [...currentComments, formattedComment],
+            };
+          }
+          return post;
+        });
+      });
+    };
+
+    // Listen for like updates
+    const handleLikeUpdate = (data: { postId: string; likes: number; likers: string[]; action: string; userId: string }) => {
+      console.log('Received like-updated event:', data);
+      
+      // Update selectedPost if it's the same post
+      if (selectedPost && selectedPost.id === data.postId) {
+        setSelectedPost((prev) => {
+          if (!prev || prev.id !== data.postId) return prev;
+          return {
+            ...prev,
+            likes: data.likes,
+            likers: data.likers,
+          };
+        });
+      }
+
+      // Update posts array (always update if post exists in feed)
+      setPosts((prevPosts) => {
+        return prevPosts.map((post) => {
+          if (post.id === data.postId) {
+            return {
+              ...post,
+              likes: data.likes,
+              likers: data.likers,
+            };
+          }
+          return post;
+        });
+      });
+    };
+
+    // Listen for new posts from people we follow
+    const handleNewPost = (data: { post: any }) => {
+      console.log('Received new-post event:', data);
+      
+      if (!data || !data.post) {
+        console.error('Invalid new-post data:', data);
+        return;
+      }
+
+      const newPost = data.post;
+      
+      // Transform the post to match Post type
+      const transformedPost: Post = {
+        id: newPost.id,
+        title: newPost.title,
+        content: newPost.content,
+        type: newPost.type,
+        image: newPost.image_url || undefined,
+        videoLink: newPost.video_url || undefined,
+        createdAt: newPost.created_at || newPost.createdAt,
+        user: newPost.user || 'Unknown',
+        likes: newPost.likes || 0,
+        likers: newPost.likers || [],
+        comments: [], // Comments will be loaded when post is opened
+      };
+
+      // Check if post already exists (avoid duplicates)
+      setPosts((prevPosts) => {
+        const exists = prevPosts.some(p => p.id === transformedPost.id);
+        if (exists) {
+          console.log('Post already exists in feed, skipping:', transformedPost.id);
+          return prevPosts;
+        }
+        
+        // Add new post to the beginning of the feed
+        console.log('Adding new post to feed:', transformedPost.id);
+        return [transformedPost, ...prevPosts];
+      });
+    };
+
+    socket.on('new-comment', handleNewComment);
+    socket.on('like-updated', handleLikeUpdate);
+    socket.on('new-post', handleNewPost);
+
+    // Handle reconnection - rejoin rooms when reconnected
+    const handleReconnect = () => {
+      console.log('Socket reconnected, rejoining rooms');
+      
+      // Rejoin user and feed rooms
+      if (user) {
+        socket.emit('join-user', user.id);
+        socket.emit('join-feed');
+      }
+      
+      // Rejoin post-specific rooms
+      if (selectedPost) {
+        socket.emit('join-post', selectedPost.id);
+      }
+      // Rejoin all post rooms
+      posts.forEach(post => {
+        socket.emit('join-post', post.id);
+      });
+    };
+
+    socket.on('reconnect', handleReconnect);
+
+    // Cleanup
+    return () => {
+      // Don't leave rooms on cleanup - keep them joined for real-time updates
+      socket.off('new-comment', handleNewComment);
+      socket.off('like-updated', handleLikeUpdate);
+      socket.off('new-post', handleNewPost);
+      socket.off('reconnect', handleReconnect);
+    };
+  }, [selectedPost, posts]);
+
+  const getTimeAgo = (createdAt: string | Date | undefined): string => {
+    if (!createdAt) return 'just now';
+    
+    try {
+      const now = new Date();
+      let postDate: Date;
+      
+      // Handle different input types
+      if (createdAt instanceof Date) {
+        postDate = createdAt;
+      } else if (typeof createdAt === 'string') {
+        // Ensure the string is a valid ISO date
+        let dateString = createdAt;
+        
+        // If it's not already in ISO format, try to convert it
+        if (!dateString.includes('T') && !dateString.includes('Z') && !dateString.match(/[+-]\d{2}:\d{2}$/)) {
+          // Try to parse as a date string and convert to ISO
+          const tempDate = new Date(dateString);
+          if (!isNaN(tempDate.getTime())) {
+            dateString = tempDate.toISOString();
+          }
+        }
+        
+        postDate = new Date(dateString);
+      } else {
+        return 'just now';
+      }
+      
+      // Check if date is valid
+      if (isNaN(postDate.getTime())) {
+        console.warn('Invalid date in getTimeAgo:', createdAt);
+        return 'just now';
+      }
+      
+      const diffInSeconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
+      
+      // Handle negative differences (future dates) - return "just now" for very recent or future dates
+      if (diffInSeconds < 0) {
+        return 'just now';
+      }
+
+      if (diffInSeconds < 10) {
+        return 'just now';
+      } else if (diffInSeconds < 60) {
+        return `${diffInSeconds}s ago`;
+      } else if (diffInSeconds < 3600) {
+        const minutes = Math.floor(diffInSeconds / 60);
+        return `${minutes}m ago`;
+      } else if (diffInSeconds < 86400) {
+        const hours = Math.floor(diffInSeconds / 3600);
+        return `${hours}h ago`;
+      } else {
+        const days = Math.floor(diffInSeconds / 86400);
+        return `${days}d ago`;
+      }
+    } catch (error) {
+      console.warn('Error in getTimeAgo:', error, 'for date:', createdAt);
+      return 'just now';
     }
   };
 
@@ -207,33 +534,8 @@ export default function Dashboard() {
         await api.likePost(postId);
       }
 
-      // Update local state
-      setPosts((prevPosts) => {
-        const updatedPosts = prevPosts.map((post) => {
-          if (post.id !== postId) return post;
-
-          const likers = post.likers ? [...post.likers] : [];
-          const nextLikers = hasLiked 
-            ? likers.filter(id => id !== user.id)
-            : [...likers, user.id];
-
-          return {
-            ...post,
-            likers: nextLikers,
-            likes: nextLikers.length,
-          };
-        });
-
-        // Update selectedPost if it's the same post
-        if (selectedPost && selectedPost.id === postId) {
-          const updatedPost = updatedPosts.find(p => p.id === postId);
-          if (updatedPost) {
-            setSelectedPost(updatedPost);
-          }
-        }
-
-        return updatedPosts;
-      });
+      // Don't do optimistic update - let the socket event handle the update
+      // This ensures we always have the correct count from the backend database
     } catch (error) {
       console.error('Failed to like/unlike post:', error);
     }
@@ -255,44 +557,13 @@ export default function Dashboard() {
     setCommentInputs({ ...commentInputs, [postId]: "" });
 
     try {
-      const response = await api.addComment(postId, commentText);
-      if (response && response.success && response.comment) {
-        const serverComment = response.comment;
-        const formattedComment: Comment = {
-          id: serverComment.id,
-          text: serverComment.text,
-          user: serverComment.user,
-          userPhoto: serverComment.userPhoto || undefined,
-          createdAt: serverComment.createdAt,
-        };
-
-        setPosts((prevPosts) => {
-          const updatedPosts = prevPosts.map((post) => {
-            if (post.id === postId) {
-              return {
-                ...post,
-                comments: [...(post.comments || []), formattedComment],
-              };
-            }
-            return post;
-          });
-
-          // Update selectedPost if it's the same post
-          if (selectedPost && selectedPost.id === postId) {
-            const updatedPost = updatedPosts.find(p => p.id === postId);
-            if (updatedPost) {
-              setSelectedPost(updatedPost);
-            }
-          }
-
-          return updatedPosts;
-        });
-      } else {
-        console.error('Unexpected response from addComment', response);
-      }
+      await api.addComment(postId, commentText);
+      // Don't do optimistic update - let the socket event handle the update
+      // This ensures we always have the correct comment data (user, date, etc.) from the backend
     } catch (error) {
       console.error('Failed to add comment via API:', error);
-      // optionally restore input or show message
+      // Restore input on error
+      setCommentInputs({ ...commentInputs, [postId]: commentText });
     }
   };
 
@@ -602,9 +873,14 @@ export default function Dashboard() {
                           setSelectedPost(post);
                         }}
                         aria-label="Comment on post"
-                        title="Comment"
+                        title={`${post.comments?.length || 0} comment${(post.comments?.length || 0) !== 1 ? 's' : ''}`}
                       >
                         <FaComment className="comment-icon" />
+                        <span className="comment-count">
+                          {post.comments && post.comments.length > 0 
+                            ? post.comments.length 
+                            : (post as any)._initialCommentCount || 0}
+                        </span>
                       </button>
                     </div>
                     {user && post.user === user.username && (
@@ -706,7 +982,7 @@ export default function Dashboard() {
                           <div className="comment-content">
                             <div className="comment-header">
                               <span className="comment-username">{comment.user}</span>
-                              <span className="comment-time">{getTimeAgo(comment.createdAt)}</span>
+                              <span className="comment-time">{comment.timeAgo || getTimeAgo(comment.createdAt)}</span>
                             </div>
                             <p className="comment-text">{comment.text}</p>
                           </div>

@@ -1,0 +1,186 @@
+name: CI Pipeline
+
+# Workflow disabled for now - uncomment below to re-enable and delete workflow_dispatch
+# on:
+#   push:
+#     branches: [main, "**"]
+#   pull_request:
+#     branches: [main]
+on:
+  workflow_dispatch: # Only allows manual triggering
+
+# Cancel in-progress runs when a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20.x"
+  COVERAGE_THRESHOLD: 75
+
+jobs:
+  # ============================================
+  # QUALITY GATES (run in parallel)
+  # ============================================
+
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+        continue-on-error: false
+
+  # ============================================
+  # TESTS (with coverage threshold enforcement)
+  # ============================================
+
+  test:
+    name: Test & Coverage
+    runs-on: ubuntu-latest
+    needs: [type-check]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        id: test-run
+        run: npm run test:coverage
+        continue-on-error: false
+        env:
+          CI: true
+
+      - name: Upload coverage report (HTML)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report-html
+          path: coverage/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload coverage LCOV
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Display coverage summary
+        if: always()
+        run: |
+          if [ -f "coverage/lcov.info" ]; then
+            echo "Coverage report generated successfully"
+            echo "Coverage threshold: ${{ env.COVERAGE_THRESHOLD }}%"
+            echo "If tests passed, coverage meets the threshold"
+          else
+            echo "Warning: Coverage report not found"
+          fi
+
+  # ============================================
+  # BUILD (only after tests pass)
+  # ============================================
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+        continue-on-error: false
+
+      - name: Verify build output
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "Error: dist/ directory not found after build"
+            exit 1
+          fi
+          echo "Build output verified:"
+          ls -la dist/ | head -10
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: build-artifacts
+          path: dist/
+          retention-days: 7
+
+  # ============================================
+  # FINAL STATUS CHECK
+  # ============================================
+
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [type-check, test, build]
+    if: always()
+
+    steps:
+      - name: Check all jobs passed
+        run: |
+          echo "=========================================="
+          echo "CI Pipeline Status Summary"
+          echo "=========================================="
+          echo "Type Check: ${{ needs.type-check.result }}"
+          echo "Tests: ${{ needs.test.result }}"
+          echo "Build: ${{ needs.build.result }}"
+          echo "=========================================="
+
+          if [ "${{ needs.type-check.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ]; then
+            echo ""
+            echo " CI Pipeline Failed"
+            echo ""
+            echo "Failed jobs:"
+            [ "${{ needs.type-check.result }}" != "success" ] && echo "  - Type Check" || true
+            [ "${{ needs.test.result }}" != "success" ] && echo "  - Tests & Coverage" || true
+            [ "${{ needs.build.result }}" != "success" ] && echo "  - Build" || true
+            exit 1
+          fi
+
+          echo ""
+          echo " All CI checks passed!"
+          echo " Type checking: Passing"
+          echo " Tests: Passing (Coverage ≥ ${{ env.COVERAGE_THRESHOLD }}%)"
+          echo " Build: Successful"
