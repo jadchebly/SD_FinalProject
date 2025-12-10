@@ -61,213 +61,345 @@ const generateId = (prefix: string) => `${prefix}-${++idCounter}`;
 
 type FilterFn = (row: any) => boolean;
 
-class MockQuery<T extends TableName> {
-  private filters: FilterFn[] = [];
-  private orderSpec: { column: string; ascending: boolean } | null = null;
-  private limitValue?: number;
-  private selectQuery?: string;
-  private selectOptions?: { count?: 'exact'; head?: boolean };
-  private operation: 'select' | 'insert' | 'delete' | 'update' = 'select';
-  private isDeleteOperation = false; // Track if delete() was called (even if select() is called after)
-  private isUpdateOperation = false; // Track if update() was called (even if select() is called after)
-  private insertedRows: any[] = [];
+// Mock DatabaseQuery class that matches the actual DatabaseQuery API
+class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: number }> {
+  private table: string;
+  private selectFields: string[] = ['*'];
+  private whereConditions: Array<{ field: string; operator: string; value: any }> = [];
+  private orderByField?: string;
+  private orderByAscending: boolean = true;
+  private limitCount?: number;
+  private insertData?: any;
   private updateData?: any;
-  private forceEmpty = false;
-  private orFilters: FilterFn[] = []; // Filters that use OR logic
+  private deleteMode: boolean = false;
+  private countMode: boolean = false;
+  private singleMode: boolean = false;
 
-  constructor(private readonly tableName: T) {}
-
-  select(columns: string | string[] = '*', options?: { count?: 'exact'; head?: boolean }): this {
-    this.operation = 'select';
-    this.selectQuery = Array.isArray(columns) ? columns.join(',') : columns;
-    this.selectOptions = options;
-    return this;
+  constructor(table: string) {
+    this.table = table;
   }
 
-  insert(payload: any): this {
-    this.operation = 'insert';
-    const rows = Array.isArray(payload) ? payload : [payload];
-    this.insertedRows = rows.map(row => this.prepareRow({ ...row }));
-    const target = mockDataStore[this.tableName] as any[];
-    this.insertedRows.forEach(record => target.push(record));
-    return this;
+  // Make this class thenable so it can be awaited directly
+  then<TResult1 = { data: any; error: any; count?: number }, TResult2 = never>(
+    onfulfilled?: ((value: { data: any; error: any; count?: number }) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
+  ): Promise<TResult1 | TResult2> {
+    return Promise.resolve(this.execute()).then(onfulfilled, onrejected);
   }
 
-  update(payload: any): this {
-    this.operation = 'update';
-    this.isUpdateOperation = true; // Mark that update was called
-    this.updateData = payload;
-    return this;
-  }
-
-  delete(): this {
-    this.operation = 'delete';
-    this.isDeleteOperation = true; // Mark that delete was called
-    return this;
-  }
-
-  eq(column: string, value: any): this {
-    this.filters.push(row => row[column] === value);
-    return this;
-  }
-
-  in(column: string, values: any[]): this {
-    if (!values || values.length === 0) {
-      this.forceEmpty = true;
+  select(fields: string | string[] = '*', options?: { count?: 'exact' | 'estimated' | 'planned'; head?: boolean }): this {
+    // Handle count queries
+    if (options?.count) {
+      this.countMode = true;
       return this;
     }
-    const set = new Set(values);
-    this.filters.push(row => set.has(row[column]));
+    
+    if (typeof fields === 'string') {
+      // Handle nested selects with joins like "users:user_id (id, username, avatar_url)"
+      if (fields.includes('(') && fields.includes(':')) {
+        // Parse nested select - for now, we'll handle this in the query execution
+        this.selectFields = [fields];
+      } else {
+        this.selectFields = fields === '*' ? ['*'] : fields.split(',').map(f => f.trim());
+      }
+    } else {
+      this.selectFields = fields;
+    }
     return this;
   }
 
-  or(conditionString: string): this {
-    // Parse format like "email.eq.value,username.eq.value"
-    // Value may contain dots (e.g., email addresses)
-    const conditions = conditionString.split(',');
-    const orFilter: FilterFn = (row) => {
-      return conditions.some(cond => {
-        const trimmed = cond.trim();
-        // Match pattern: column.operator.value
-        // Use regex to capture: (column).(operator).(value)
-        const match = trimmed.match(/^([^.]+)\.([^.]+)\.(.+)$/);
-        if (!match) return false;
-        
-        const [, column, operator, value] = match;
-
-        if (operator === 'eq') {
-          return row[column] === value;
-        }
-        return false;
-      });
-    };
-    this.orFilters.push(orFilter);
+  eq(field: string, value: any): this {
+    this.whereConditions.push({ field, operator: '=', value });
     return this;
   }
 
-  ilike(column: string, pattern: string): this {
-    // Case-insensitive LIKE matching with % wildcards
-    const regexPattern = pattern
-      .replace(/%/g, '.*')
-      .replace(/_/g, '.');
-    const regex = new RegExp(`^${regexPattern}$`, 'i');
-    this.filters.push(row => {
-      const value = row[column];
-      return value && typeof value === 'string' && regex.test(value);
+  neq(field: string, value: any): this {
+    this.whereConditions.push({ field, operator: '!=', value });
+    return this;
+  }
+
+  in(field: string, values: any[]): this {
+    if (!values || values.length === 0) {
+      // Return empty result for empty IN clause
+      this.whereConditions.push({ field, operator: 'IN_EMPTY', value: [] });
+      return this;
+    }
+    this.whereConditions.push({ field, operator: 'IN', value: values });
+    return this;
+  }
+
+  or(condition: string): this {
+    // Parse OR conditions like "email.eq.test@example.com,username.eq.test"
+    const parts = condition.split(',');
+    const orConditions: Array<{ field: string; operator: string; value: any }> = [];
+    parts.forEach(part => {
+      const match = part.match(/(\w+)\.(eq|neq|in)\.(.+)/);
+      if (match) {
+        const [, field, op, value] = match;
+        const operator = op === 'eq' ? '=' : op === 'neq' ? '!=' : 'IN';
+        orConditions.push({ field, operator, value });
+      }
     });
+    // Store OR conditions as a special marker
+    if (orConditions.length > 0) {
+      this.whereConditions.push({ field: '__OR__', operator: 'OR', value: orConditions });
+    }
     return this;
   }
 
-  order(column: string, options?: { ascending?: boolean }): this {
-    this.orderSpec = {
-      column,
-      ascending: options?.ascending ?? true,
-    };
+  ilike(field: string, pattern: string): this {
+    this.whereConditions.push({ field, operator: 'ILIKE', value: pattern });
+    return this;
+  }
+
+  order(field: string, options?: { ascending?: boolean }): this {
+    this.orderByField = field;
+    this.orderByAscending = options?.ascending !== false;
     return this;
   }
 
   limit(count: number): this {
-    this.limitValue = count;
+    this.limitCount = count;
     return this;
   }
 
-  single(): Promise<{ data: any; error: any }> {
-    return this.execute(true).then(result => {
-      if ('count' in result) {
-        return { data: null, error: null };
+  insert(data: any): this {
+    this.insertData = data;
+    return this;
+  }
+
+  update(data: any): this {
+    this.updateData = data;
+    return this;
+  }
+
+  delete(): this {
+    this.deleteMode = true;
+    return this;
+  }
+
+  single(): this {
+    this.singleMode = true;
+    this.limitCount = 1;
+    return this;
+  }
+
+  async execute(): Promise<{ data: any; error: any; count?: number }> {
+    try {
+      const tableData = mockDataStore[this.table as TableName] as any[];
+
+      // Handle count queries
+      if (this.countMode) {
+        let rows = [...tableData];
+        rows = this.applyFilters(rows);
+        const count = rows.length;
+        return { data: null, error: null, count };
       }
-      return result as { data: any; error: any };
+
+      // Handle DELETE
+      if (this.deleteMode) {
+        const { deleted } = this.partitionRows(tableData);
+        return {
+          data: this.singleMode ? (deleted[0] ?? null) : deleted,
+          error: null,
+        };
+      }
+
+      // Handle UPDATE
+      if (this.updateData) {
+        const { updated } = this.applyUpdate(tableData);
+        return {
+          data: this.singleMode ? (updated[0] ?? null) : updated,
+          error: null,
+        };
+      }
+
+      // Handle INSERT
+      if (this.insertData) {
+        const newRow = this.prepareRow({ ...this.insertData });
+        tableData.push(newRow);
+        const insertedRow = { ...newRow };
+        
+        // Apply any filters/selects to the inserted row
+        let result = [insertedRow];
+        result = this.applySelect(result);
+        result = this.applyFilters(result);
+        
+        return {
+          data: this.singleMode ? (result[0] ?? null) : result,
+          error: null,
+        };
+      }
+
+      // Handle SELECT
+      let rows = [...tableData];
+      rows = this.applySelect(rows);
+      rows = this.applyFilters(rows);
+      rows = this.applyOrdering(rows);
+
+      if (typeof this.limitCount === 'number') {
+        rows = rows.slice(0, this.limitCount);
+      }
+
+      return {
+        data: this.singleMode ? (rows[0] ?? null) : rows,
+        error: null,
+      };
+    } catch (error: any) {
+      console.error('Database query error:', error);
+      return { data: null, error };
+    }
+  }
+
+  private applySelect(rows: any[]): any[] {
+    // Handle nested selects with joins like "users:user_id (id, username, avatar_url)"
+    if (this.selectFields.length === 1 && this.selectFields[0].includes('(') && this.selectFields[0].includes(':')) {
+      const match = this.selectFields[0].match(/(\w+):(\w+)\s*\(([^)]+)\)/);
+      if (match) {
+        const [, joinTable, foreignKey, fields] = match;
+        const fieldList = fields.split(',').map(f => f.trim());
+        
+        return rows.map(row => {
+          const joinedData: any = {};
+          const relatedRow = (mockDataStore[joinTable as TableName] as any[]).find(
+            (r: any) => r.id === row[foreignKey]
+          );
+          
+          if (relatedRow) {
+            fieldList.forEach(field => {
+              joinedData[field] = relatedRow[field];
+            });
+          }
+          
+          return {
+            ...row,
+            [joinTable]: Object.keys(joinedData).length > 0 ? joinedData : null
+          };
+        });
+      }
+    }
+    
+    // For simple selects, return rows as-is (we'll filter fields if needed)
+    return rows;
+  }
+
+  private applyFilters(rows: any[]): any[] {
+    if (this.whereConditions.length === 0) {
+      return rows;
+    }
+
+    return rows.filter(row => {
+      // Check for empty IN clause
+      const hasEmptyIn = this.whereConditions.some(
+        cond => cond.operator === 'IN_EMPTY'
+      );
+      if (hasEmptyIn) {
+        return false;
+      }
+
+      // Regular filters (AND logic)
+      const regularFilters = this.whereConditions.filter(
+        cond => cond.field !== '__OR__'
+      );
+      
+      // OR filters
+      const orFilter = this.whereConditions.find(
+        cond => cond.field === '__OR__' && cond.operator === 'OR'
+      );
+
+      // All regular filters must pass
+      const allRegularPass = regularFilters.length === 0 || regularFilters.every(cond => {
+        if (cond.operator === 'IN') {
+          return cond.value.includes(row[cond.field]);
+        } else if (cond.operator === 'ILIKE') {
+          const regexPattern = cond.value
+            .replace(/%/g, '.*')
+            .replace(/_/g, '.');
+          const regex = new RegExp(`^${regexPattern}$`, 'i');
+          return row[cond.field] && typeof row[cond.field] === 'string' && regex.test(row[cond.field]);
+        } else {
+          return row[cond.field] === cond.value;
+        }
+      });
+
+      // At least one OR condition must pass (if any exist)
+      let anyOrPass = true;
+      if (orFilter) {
+        const orConditions = orFilter.value as Array<{ field: string; operator: string; value: any }>;
+        anyOrPass = orConditions.some(orCond => {
+          if (orCond.operator === 'IN') {
+            return Array.isArray(orCond.value) && orCond.value.includes(row[orCond.field]);
+          } else {
+            return row[orCond.field] === orCond.value;
+          }
+        });
+      }
+
+      return allRegularPass && anyOrPass;
     });
   }
 
-  then<TResult1 = { data: any[]; error: any } | { count: number; error: any }, TResult2 = never>(
-    onFulfilled?: ((value: { data: any[]; error: any } | { count: number; error: any }) => TResult1 | PromiseLike<TResult1>) | null,
-    onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
-  ): Promise<TResult1 | TResult2> {
-    return this.execute(false).then(onFulfilled as any, onRejected as any);
-  }
-
-  private async execute(single: boolean): Promise<{ data: any; error: any } | { data: any[]; error: any } | { count: number; error: any }> {
-    if (this.isDeleteOperation || this.operation === 'delete') {
-      const { deleted } = this.partitionRows();
-      return {
-        data: single ? deleted[0] ?? null : deleted,
-        error: null,
-      };
+  private applyOrdering(rows: any[]): any[] {
+    if (!this.orderByField) {
+      return rows;
     }
 
-    if (this.isUpdateOperation || this.operation === 'update') {
-      const { updated } = this.applyUpdate();
-      return {
-        data: single ? updated[0] ?? null : updated,
-        error: null,
-      };
-    }
+    const { orderByField, orderByAscending } = this;
+    return [...rows].sort((a, b) => {
+      const aVal = a[orderByField];
+      const bVal = b[orderByField];
 
-    if (this.forceEmpty) {
-      const countResult = this.selectOptions?.count === 'exact' && this.selectOptions?.head;
-      if (countResult) {
-        return { count: 0, error: null };
+      if (aVal === bVal) {
+        return 0;
       }
-      return { data: single ? null : [], error: null };
-    }
 
-    let rows: any[];
+      if (aVal === undefined || aVal === null) {
+        return orderByAscending ? -1 : 1;
+      }
+      if (bVal === undefined || bVal === null) {
+        return orderByAscending ? 1 : -1;
+      }
 
-    if (this.operation === 'insert' && this.insertedRows.length > 0) {
-      rows = [...this.insertedRows];
-    } else {
-      rows = (mockDataStore[this.tableName] as any[]).map(row => ({ ...row }));
-    }
+      if (this.isDateLike(aVal) && this.isDateLike(bVal)) {
+        const diff = new Date(aVal).getTime() - new Date(bVal).getTime();
+        return orderByAscending ? diff : -diff;
+      }
 
-    rows = this.applyFilters(rows);
-    rows = this.applyOrdering(rows);
-
-    // Handle count select (only used without single())
-    if (this.selectOptions?.count === 'exact' && this.selectOptions?.head) {
-      return { count: rows.length, error: null };
-    }
-
-    if (typeof this.limitValue === 'number') {
-      rows = rows.slice(0, this.limitValue);
-    }
-
-    rows = rows.map(row => this.attachRelations(row));
-
-    return {
-      data: single ? rows[0] ?? null : rows,
-      error: null,
-    };
+      const comparison = aVal > bVal ? 1 : -1;
+      return orderByAscending ? comparison : -comparison;
+    });
   }
 
-  private partitionRows() {
-    const rows = mockDataStore[this.tableName] as any[];
+  private isDateLike(value: any): boolean {
+    return typeof value === 'string' && !Number.isNaN(Date.parse(value));
+  }
+
+  private partitionRows(tableData: any[]) {
     const deleted: any[] = [];
     const remaining: any[] = [];
 
-    rows.forEach(row => {
-      if (this.filters.every(fn => fn(row))) {
+    tableData.forEach(row => {
+      if (this.matchesFilters(row)) {
         deleted.push(row);
       } else {
         remaining.push(row);
       }
     });
 
-    rows.length = 0;
-    rows.push(...remaining);
+    // Update the store
+    tableData.length = 0;
+    tableData.push(...remaining);
 
     return { deleted };
   }
 
-  private applyUpdate() {
-    const rows = mockDataStore[this.tableName] as any[];
+  private applyUpdate(tableData: any[]) {
     const updated: any[] = [];
 
-    rows.forEach((row, index) => {
-      if (this.filters.every(fn => fn(row))) {
-        // Merge update data into the row
+    tableData.forEach((row, index) => {
+      if (this.matchesFilters(row)) {
         const updatedRow = { ...row, ...this.updateData };
-        rows[index] = updatedRow;
+        tableData[index] = updatedRow;
         updated.push(updatedRow);
       }
     });
@@ -275,78 +407,50 @@ class MockQuery<T extends TableName> {
     return { updated };
   }
 
-  private applyFilters(rows: any[]): any[] {
-    if (this.filters.length === 0 && this.orFilters.length === 0) {
-      return rows;
+  private matchesFilters(row: any): boolean {
+    if (this.whereConditions.length === 0) {
+      return true;
     }
-    return rows.filter(row => {
-      // All regular filters must pass (AND logic)
-      const allFiltersPass = this.filters.length === 0 || this.filters.every(fn => fn(row));
-      // At least one OR filter must pass (if any exist)
-      const anyOrFilterPass = this.orFilters.length === 0 || this.orFilters.some(fn => fn(row));
-      
-      // If no regular filters, just check OR filters
-      // If no OR filters, just check regular filters
-      // If both exist, both conditions must be met
-      if (this.filters.length === 0) {
-        return anyOrFilterPass;
+
+    const regularFilters = this.whereConditions.filter(
+      cond => cond.field !== '__OR__'
+    );
+    
+    const orFilter = this.whereConditions.find(
+      cond => cond.field === '__OR__' && cond.operator === 'OR'
+    );
+
+    const allRegularPass = regularFilters.length === 0 || regularFilters.every(cond => {
+      if (cond.operator === 'IN') {
+        return cond.value.includes(row[cond.field]);
+      } else if (cond.operator === 'ILIKE') {
+        const regexPattern = cond.value
+          .replace(/%/g, '.*')
+          .replace(/_/g, '.');
+        const regex = new RegExp(`^${regexPattern}$`, 'i');
+        return row[cond.field] && typeof row[cond.field] === 'string' && regex.test(row[cond.field]);
+      } else {
+        return row[cond.field] === cond.value;
       }
-      if (this.orFilters.length === 0) {
-        return allFiltersPass;
-      }
-      return allFiltersPass && anyOrFilterPass;
     });
-  }
 
-  private applyOrdering(rows: any[]): any[] {
-    if (!this.orderSpec) {
-      return rows;
-    }
-    const { column, ascending } = this.orderSpec;
-    return [...rows].sort((a, b) => {
-      const aVal = a[column];
-      const bVal = b[column];
-
-      if (aVal === bVal) {
-        return 0;
-      }
-
-      if (aVal === undefined) {
-        return ascending ? -1 : 1;
-      }
-      if (bVal === undefined) {
-        return ascending ? 1 : -1;
-      }
-
-      if (this.isDateLike(aVal) && this.isDateLike(bVal)) {
-        const diff = new Date(aVal).getTime() - new Date(bVal).getTime();
-        return ascending ? diff : -diff;
-      }
-
-      const comparison = aVal > bVal ? 1 : -1;
-      return ascending ? comparison : -comparison;
-    });
-  }
-
-  private isDateLike(value: any): value is string {
-    return typeof value === 'string' && !Number.isNaN(Date.parse(value));
-  }
-
-  private attachRelations(row: any) {
-    if (!this.selectQuery) {
-      return row;
+    let anyOrPass = true;
+    if (orFilter) {
+      const orConditions = orFilter.value as Array<{ field: string; operator: string; value: any }>;
+      anyOrPass = orConditions.some(orCond => {
+        if (orCond.operator === 'IN') {
+          return Array.isArray(orCond.value) && orCond.value.includes(row[orCond.field]);
+        } else {
+          return row[orCond.field] === orCond.value;
+        }
+      });
     }
 
-    const result = { ...row };
-    if (this.selectQuery.includes('users:user_id')) {
-      result.users = mockDataStore.users.find(user => user.id === row.user_id) || null;
-    }
-
-    return result;
+    return allRegularPass && anyOrPass;
   }
 
   private prepareRow(row: any) {
-    if (this.tableName === 'comments') {
+    if (this.table === 'comments') {
       if (!row.id) {
         row.id = generateId('comment');
       }
@@ -355,7 +459,7 @@ class MockQuery<T extends TableName> {
       }
     }
 
-    if (this.tableName === 'posts') {
+    if (this.table === 'posts') {
       if (!row.id) {
         row.id = generateId('post');
       }
@@ -364,7 +468,7 @@ class MockQuery<T extends TableName> {
       }
     }
 
-    if (this.tableName === 'users' && !row.id) {
+    if (this.table === 'users' && !row.id) {
       row.id = generateId('user');
     }
 
@@ -372,33 +476,30 @@ class MockQuery<T extends TableName> {
   }
 }
 
-const createMockClient = () => ({
-  from<T extends TableName>(table: T) {
-    return new MockQuery(table);
-  },
-  storage: {
-    from(bucket: string) {
-      return {
-        async upload(path: string, _body?: unknown) {
-          return { data: { path: `${bucket}/${path}` }, error: null };
-        },
-        getPublicUrl(path: string) {
-          return {
-            data: { publicUrl: `https://mock-storage/${bucket}/${path}` },
-            error: null,
-          };
-        },
-        async remove(_paths: string[]) {
-          return { data: null, error: null };
-        },
-      };
-    },
-  },
-});
+// DatabaseClient class that matches the actual API
+class DatabaseClient {
+  from(table: string): DatabaseQuery {
+    return new DatabaseQuery(table);
+  }
+}
 
-export const supabase = createMockClient();
-export const supabaseAdmin = createMockClient();
+// Export database clients matching the actual API
+export const db = new DatabaseClient();
+export const dbAdmin = new DatabaseClient(); // Same as db for RDS
 
+// Export pool mock (not used in tests, but needed for compatibility)
+export const dbPool = {
+  query: async () => ({ rows: [] }),
+} as any;
+
+// Test connection function
+export async function testConnection(): Promise<boolean> {
+  return true;
+}
+
+export default db;
+
+// Reset function for tests
 export const resetMockData = () => {
   mockDataStore.users = [];
   mockDataStore.posts = [];
@@ -407,4 +508,3 @@ export const resetMockData = () => {
   mockDataStore.comments = [];
   idCounter = 0;
 };
-
