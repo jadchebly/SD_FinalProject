@@ -48,7 +48,7 @@ const mockUser = {
 // Create mock functions that can be updated in tests
 const mockFollowUserFn = vi.fn();
 const mockUnfollowUserFn = vi.fn();
-const mockGetFollowingListFn = vi.fn(() => []);
+const mockGetFollowingListFn = vi.fn<() => string[]>(() => []);
 
 // Mock AuthContext
 vi.mock('../../../../contexts/AuthContext', async () => {

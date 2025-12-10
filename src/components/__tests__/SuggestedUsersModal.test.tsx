@@ -30,7 +30,7 @@ const mockUser = {
 
 const mockFollowUser = vi.fn();
 const mockUnfollowUser = vi.fn();
-const mockGetFollowingList = vi.fn<string[], []>(() => []);
+const mockGetFollowingList = vi.fn<() => string[]>(() => []);
 
 // Mock AuthContext
 vi.mock('../../contexts/AuthContext', async () => {
