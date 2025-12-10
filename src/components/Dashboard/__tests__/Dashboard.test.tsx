@@ -77,7 +77,7 @@ vi.mock('../../../services/api', () => ({
 }));
 
 // Mock window.scrollTo
-global.window.scrollTo = vi.fn();
+window.scrollTo = vi.fn();
 
 const mockUser = {
   id: 'user-123',
@@ -2133,7 +2133,6 @@ describe('Dashboard Component - A. Post display', () => {
       });
 
       it('should stop propagation when like button is clicked', async () => {
-        const user = userEvent.setup();
         const mockPosts = [
           {
             id: 'post-1',
@@ -2160,7 +2159,6 @@ describe('Dashboard Component - A. Post display', () => {
 
         const likeButton = screen.getByRole('button', { name: /like post/i });
         const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
-        const stopPropagationSpy = vi.spyOn(clickEvent, 'stopPropagation');
         
         likeButton.dispatchEvent(clickEvent);
 
@@ -2175,7 +2173,7 @@ describe('Dashboard Component - A. Post display', () => {
     beforeEach(() => {
       vi.clearAllMocks();
       vi.mocked(api.default.deletePost).mockResolvedValue({ success: true });
-      global.alert = vi.fn();
+      window.alert = vi.fn();
     });
 
     describe('✅ Delete post from edit modal', () => {
@@ -2674,7 +2672,7 @@ describe('Dashboard Component - A. Post display', () => {
         }, { timeout: 3000 });
 
         // Verify alert was shown
-        expect(global.alert).toHaveBeenCalledWith('Failed to delete post: Delete failed');
+        expect(window.alert).toHaveBeenCalledWith('Failed to delete post: Delete failed');
 
         // Verify post is still displayed (not deleted)
         expect(screen.getByText('Test Post')).toBeInTheDocument();
@@ -2753,7 +2751,7 @@ describe('Dashboard Component - A. Post display', () => {
     beforeEach(() => {
       vi.clearAllMocks();
       vi.mocked(api.default.updatePost).mockResolvedValue({ success: true });
-      global.alert = vi.fn();
+      window.alert = vi.fn();
     });
 
     describe('✅ Open edit modal', () => {
@@ -3290,7 +3288,7 @@ describe('Dashboard Component - A. Post display', () => {
         await user.click(saveButton);
 
         // Verify alert was shown
-        expect(global.alert).toHaveBeenCalledWith('Title and content cannot be empty');
+        expect(window.alert).toHaveBeenCalledWith('Title and content cannot be empty');
 
         // Verify API was not called
         expect(api.default.updatePost).not.toHaveBeenCalled();
@@ -3339,7 +3337,7 @@ describe('Dashboard Component - A. Post display', () => {
         await user.click(saveButton);
 
         // Verify alert was shown
-        expect(global.alert).toHaveBeenCalledWith('Title and content cannot be empty');
+        expect(window.alert).toHaveBeenCalledWith('Title and content cannot be empty');
 
         // Verify API was not called
         expect(api.default.updatePost).not.toHaveBeenCalled();
@@ -3389,7 +3387,7 @@ describe('Dashboard Component - A. Post display', () => {
         await user.click(saveButton);
 
         // Verify alert was shown
-        expect(global.alert).toHaveBeenCalledWith('Title and content cannot be empty');
+        expect(window.alert).toHaveBeenCalledWith('Title and content cannot be empty');
 
         // Verify API was not called
         expect(api.default.updatePost).not.toHaveBeenCalled();
@@ -3449,7 +3447,7 @@ describe('Dashboard Component - A. Post display', () => {
         }, { timeout: 3000 });
 
         // Verify alert was shown
-        expect(global.alert).toHaveBeenCalledWith('Failed to update post: Update failed');
+        expect(window.alert).toHaveBeenCalledWith('Failed to update post: Update failed');
 
         // Verify post was not updated in display
         expect(screen.getByText('Original Title')).toBeInTheDocument();

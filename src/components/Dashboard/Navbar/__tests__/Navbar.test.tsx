@@ -3,7 +3,8 @@
  * Tests for navigation functionality
  */
 
-import { describe, it, expect, vi, beforeEach, act } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { act } from '@testing-library/react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -36,7 +37,7 @@ vi.mock('../../../../services/api', () => ({
 }));
 
 // Mock window.scrollTo
-global.window.scrollTo = vi.fn();
+window.scrollTo = vi.fn();
 
 const mockUser = {
   id: 'user-123',
@@ -46,9 +47,9 @@ const mockUser = {
 };
 
 // Create mock functions that can be updated in tests
-let mockFollowUserFn: ReturnType<typeof vi.fn> = vi.fn();
-let mockUnfollowUserFn: ReturnType<typeof vi.fn> = vi.fn();
-let mockGetFollowingListFn: ReturnType<typeof vi.fn> = vi.fn(() => []);
+const mockFollowUserFn = vi.fn();
+const mockUnfollowUserFn = vi.fn();
+const mockGetFollowingListFn = vi.fn(() => []);
 
 // Mock AuthContext
 vi.mock('../../../../contexts/AuthContext', async () => {
@@ -57,9 +58,9 @@ vi.mock('../../../../contexts/AuthContext', async () => {
     ...actual,
     useAuth: () => ({
       user: mockUser,
-      getFollowingList: () => mockGetFollowingListFn(),
-      followUser: (userId: string) => mockFollowUserFn(userId),
-      unfollowUser: (userId: string) => mockUnfollowUserFn(userId),
+      getFollowingList: mockGetFollowingListFn,
+      followUser: mockFollowUserFn,
+      unfollowUser: mockUnfollowUserFn,
     }),
   };
 });
