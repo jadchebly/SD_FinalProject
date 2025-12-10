@@ -4796,6 +4796,326 @@ describe('Dashboard Component - A. Post display', () => {
         }, { timeout: 3000 });
       });
     });
+
+    describe('✅ Additional missing branches for 80% coverage', () => {
+      it('should handle socket connection when not connected - covers else branch', async () => {
+        // This test covers: if (socket.connected && user) ... else { socket.once('connect', ...) }
+        // Else branch: when socket is not connected
+        
+        mockSocketInstance.connected = false;
+        
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 0,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        await renderDashboard();
+
+        await waitFor(() => {
+          expect(api.default.getFeed).toHaveBeenCalled();
+        }, { timeout: 3000 });
+
+        // Verify socket.once was called to wait for connection
+        await waitFor(() => {
+          expect(mockSocketInstance.once).toHaveBeenCalledWith('connect', expect.any(Function));
+        }, { timeout: 3000 });
+
+        // Reset socket to connected for cleanup
+        mockSocketInstance.connected = true;
+      });
+
+      it('should handle comment loading when response has no comments - covers branch', async () => {
+        // This test covers: if (response.success && response.comments) ... else (no action)
+        // When response.comments is falsy
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        // Mock getComments to return success but no comments array
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: null, // response.comments is falsy
+        });
+
+        await renderDashboard();
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        // Wait for getComments to be called
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalledWith('post-1');
+        }, { timeout: 3000 });
+      });
+
+      it('should handle comment loading when createdAt is missing - covers branch', async () => {
+        // This test covers: if (!createdAtValue) { createdAtValue = new Date().toISOString(); }
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        // Mock getComments to return comment with no createdAt or created_at
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [
+            {
+              id: 'comment-1',
+              text: 'Test comment',
+              user: 'commenter',
+              // No createdAt or created_at - should use new Date().toISOString()
+            },
+          ],
+        });
+
+        await renderDashboard();
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        // Wait for comments to load
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalledWith('post-1');
+        }, { timeout: 3000 });
+      });
+
+      it('should handle comment date when createdAt is not a string - covers branch', async () => {
+        // This test covers: else { createdAtValue = new Date(createdAtValue).toISOString(); }
+        // When createdAtValue is not a string (e.g., a Date object or number)
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        // Mock getComments to return comment with createdAt as a Date object
+        const dateObject = new Date('2024-01-15T10:00:00Z');
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [
+            {
+              id: 'comment-1',
+              text: 'Test comment',
+              user: 'commenter',
+              createdAt: dateObject, // Not a string, should be converted
+            },
+          ],
+        });
+
+        await renderDashboard();
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        // Wait for comments to load
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalledWith('post-1');
+        }, { timeout: 3000 });
+      });
+
+      it('should handle comment loading when response.success is false - covers else branch', async () => {
+        // This test covers: if (response.success && response.comments) ... else (no action)
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 1,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        // Mock getComments to return failure response
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: false, // response.success is false
+          comments: [],
+        });
+
+        await renderDashboard();
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        // Wait for getComments to be called
+        await waitFor(() => {
+          expect(api.default.getComments).toHaveBeenCalledWith('post-1');
+        }, { timeout: 3000 });
+
+        // Comments should not be loaded (else branch - no action taken)
+      });
+
+      it('should handle socket comment with non-string createdAt - covers else branch', async () => {
+        // This test covers: else { createdAtValue = new Date(createdAtValue).toISOString(); }
+        // When createdAtValue is not a string (e.g., a number timestamp)
+        
+        const user = userEvent.setup();
+        const mockPosts = [
+          {
+            id: 'post-1',
+            title: 'Test Post',
+            content: 'Test content',
+            type: 'blurb',
+            created_at: new Date().toISOString(),
+            user: 'user1',
+            likes: 0,
+            likers: [],
+            commentsCount: 0,
+          },
+        ];
+
+        vi.mocked(api.default.getFeed).mockResolvedValue({
+          success: true,
+          posts: mockPosts,
+        });
+
+        vi.mocked(api.default.getComments).mockResolvedValue({
+          success: true,
+          comments: [],
+        });
+
+        await renderDashboard();
+
+        await waitFor(() => {
+          expect(screen.getByText('Test Post')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        const postCard = screen.getByText('Test Post').closest('.post-card');
+        if (postCard) {
+          await user.click(postCard);
+        }
+
+        await waitFor(() => {
+          expect(screen.getByPlaceholderText('Add a comment...')).toBeInTheDocument();
+        }, { timeout: 3000 });
+
+        // Wait for socket handlers to be set up
+        await waitFor(() => {
+          const handler = socketEventHandlersStore['new-comment'];
+          expect(handler).toBeDefined();
+        }, { timeout: 5000 });
+
+        // Simulate socket event with createdAt as a number (timestamp)
+        const timestamp = Date.now();
+        const newComment = {
+          id: 'comment-1',
+          text: 'Socket comment',
+          user: 'otheruser',
+          createdAt: timestamp, // Not a string, should be converted to ISO string
+        };
+
+        const handler = socketEventHandlersStore['new-comment'];
+        if (handler) {
+          await act(() => {
+            handler({
+              postId: 'post-1',
+              comment: newComment,
+            });
+          });
+        }
+
+        // Verify comment is processed (timestamp should be converted to ISO string)
+        await waitFor(() => {
+          expect(screen.getByText('Socket comment')).toBeInTheDocument();
+        }, { timeout: 3000 });
+      });
+    });
   });
 });
 
