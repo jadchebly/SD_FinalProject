@@ -1024,12 +1024,12 @@ app.get('/api/posts/:id/comments', async (req, res) => {
 
       // Add 1 hour (3600000 ms) to compensate for timezone offset in local development
       // Azure doesn't need the offset, but local does
-      if (process.env.NODE_ENV !== 'production') {
-        createdAtDate = new Date(createdAtDate.getTime() + 3600000);
+      // if (process.env.NODE_ENV !== 'production') {
+      //   createdAtDate = new Date(createdAtDate.getTime() + 3600000);
+      //   createdAtValue = createdAtDate.toISOString();
+      // } else {
         createdAtValue = createdAtDate.toISOString();
-      } else {
-        createdAtValue = createdAtDate.toISOString();
-      }
+      // }
 
       return {
         id: comment.id,
