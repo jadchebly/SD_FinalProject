@@ -1154,7 +1154,7 @@ app.post('/api/posts/:id/comments', async (req, res) => {
     }
 
     // Add 1 hour (3600000 ms) to compensate for timezone offset
-    createdAtDate = new Date(createdAtDate.getTime() + 3600000);
+    createdAtDate = new Date(createdAtDate.getTime());
     createdAtValue = createdAtDate.toISOString();
 
     // Get username and avatar from user data
