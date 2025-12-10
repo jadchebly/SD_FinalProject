@@ -684,6 +684,9 @@ export default function Dashboard() {
 
         // Close edit modal
         handleEditCancel();
+      } else {
+        // Close edit modal even when success is false
+        handleEditCancel();
       }
     } catch (error: any) {
       console.error("Error updating post:", error);
@@ -717,7 +720,8 @@ export default function Dashboard() {
     } catch (error: any) {
       console.error("Error deleting post:", error);
       alert(`Failed to delete post: ${error?.message || "Unknown error"}`);
-      // Don't close modals on error - let user try again or cancel
+      // Close delete confirmation modal on error, but keep edit modal open
+      setShowDeleteFromEditConfirm(false);
     }
   };
 
