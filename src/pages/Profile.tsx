@@ -742,19 +742,19 @@ export default function Profile() {
                   {!isOwnProfile && (
                     <button
                       className={`follow-button ${profileInfo.isFollowing ? 'following' : ''}`}
-                      onClick={() => {
+                      onClick={async () => {
                         if (profileInfo.isFollowing) {
                           // unfollow: update UI and local state & backend
                           setProfileInfo({ ...profileInfo, isFollowing: false, followerCount: (profileInfo.followerCount || 1) - 1 });
                           try {
-                            unfollowUser(profileId);
+                            await unfollowUser(profileId);
                           } catch (e) {
                             console.warn('unfollow error', e);
                           }
                         } else {
                           setProfileInfo({ ...profileInfo, isFollowing: true, followerCount: (profileInfo.followerCount || 0) + 1 });
                           try {
-                            followUser(profileId);
+                            await followUser(profileId);
                           } catch (e) {
                             console.warn('follow error', e);
                           }
