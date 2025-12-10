@@ -1064,7 +1064,7 @@ describe('Dashboard Component - A. Post display', () => {
         expect(commentItems.length).toBe(3);
 
         // Close modal by clicking close button
-        const closeButton = screen.getByRole('button', { name: /×|close/i });
+        const closeButton = screen.getByRole('button', { name: /close modal/i });
         await user.click(closeButton);
 
         // Wait for modal to close
