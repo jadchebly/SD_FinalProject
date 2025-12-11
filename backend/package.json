@@ -17,6 +17,7 @@
     "@aws-sdk/client-s3": "^3.946.0",
     "@aws-sdk/client-secrets-manager": "^3.946.0",
     "@types/pg": "^8.15.6",
+    "applicationinsights": "^3.12.1",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "dotenv": "^16.6.1",
