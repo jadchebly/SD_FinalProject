@@ -330,7 +330,7 @@ jobs:
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_NICE_MUSHROOM_01D502303 }}
+          azure_static_web_apps_api_token: ${{ needs.prepare.outputs.is-production == 'true' && secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_NICE_MUSHROOM_01D502303 || secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PROUD_ROCK_02C383903 }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
           app_location: "/"
@@ -364,10 +364,10 @@ jobs:
         run: |
           if [ "${{ needs.prepare.outputs.is-production }}" == "true" ]; then
             BACKEND_URL="${{ secrets.VITE_BACKEND_URL_PRODUCTION }}"
-            FRONTEND_URL="${{ secrets.PRODUCTION_FRONTEND_URL || 'https://nice-mushroom-01d502303.azurestaticapps.net' }}"
+            FRONTEND_URL="${{ secrets.PRODUCTION_FRONTEND_URL }}"
           else
-            BACKEND_URL="${{ secrets.VITE_BACKEND_URL_STAGING || secrets.VITE_BACKEND_URL_PRODUCTION }}"
-            FRONTEND_URL="${{ secrets.STAGING_FRONTEND_URL || 'https://nice-mushroom-01d502303.azurestaticapps.net' }}"
+            BACKEND_URL="${{ secrets.VITE_BACKEND_URL_STAGING }}"
+            FRONTEND_URL="${{ secrets.STAGING_FRONTEND_URL }}"
           fi
           echo "backend_url=$BACKEND_URL" >> $GITHUB_OUTPUT
           echo "frontend_url=$FRONTEND_URL" >> $GITHUB_OUTPUT
