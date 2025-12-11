@@ -898,6 +898,9 @@ app.post('/api/posts/:id/like', async (req, res) => {
         name: 'Likes Added',
         value: 1
       });
+      telemetryClient.trackEvent({
+        name: 'Like Added'
+      });
     }
 
     // Get updated like count and likers
@@ -1144,6 +1147,9 @@ app.post('/api/posts/:id/comments', async (req, res) => {
       telemetryClient.trackMetric({
         name: 'Comments Added',
         value: 1
+      });
+      telemetryClient.trackEvent({
+        name: 'Comment Added'
       });
     }
 
@@ -1613,9 +1619,13 @@ app.post('/api/posts', async (req, res) => {
 
     // Track custom metric: posts created
     if (telemetryClient) {
+      console.log('📊 Tracking post metric and event...');
       telemetryClient.trackMetric({
         name: 'Posts Created',
         value: 1
+      });
+      telemetryClient.trackEvent({
+        name: 'Post Created'
       });
     }
 
