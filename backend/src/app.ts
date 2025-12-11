@@ -7,8 +7,10 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { db, dbAdmin } from './config/database';
 import { uploadImageToS3, deleteImageFromS3 } from './services/s3Service';
+import * as appInsights from 'applicationinsights';
 
 dotenv.config();
+
 
 // CORS origin validation function (shared between Express and Socket.io)
 const validateOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
@@ -49,6 +51,24 @@ const validateOrigin = (origin: string | undefined, callback: (err: Error | null
   
   callback(new Error('Not allowed by CORS'));
 };
+
+
+// Initialize Application Insights if connection string is provided
+//Source: https://signoz.io/guides/azure-app-insights/
+let telemetryClient: appInsights.TelemetryClient | undefined;
+if (process.env.APPLICATIONINSIGHTS_CONNECTION_STRING) {
+  appInsights.setup(process.env.APPLICATIONINSIGHTS_CONNECTION_STRING)
+    .setAutoCollectConsole(true, true)
+    .setAutoCollectExceptions(true)
+    .setAutoCollectRequests(true)
+    .start();
+  
+  telemetryClient = appInsights.defaultClient;
+  console.log('Application Insights initialized');
+} else {
+  console.log('Application Insights not configured');
+}
+
 
 const app = express();
 const httpServer = createServer(app);
@@ -856,6 +876,17 @@ app.post('/api/posts/:id/like', async (req, res) => {
       throw error;
     }
 
+    // Track custom metric: likes added
+    if (telemetryClient) {
+      telemetryClient.trackMetric({
+        name: 'Likes Added',
+        value: 1
+      });
+      telemetryClient.trackEvent({
+        name: 'Like Added'
+      });
+    }
+
     // Get updated like count and likers
     const { data: likes } = await db
       .from('likes')
@@ -1004,9 +1035,14 @@ app.get('/api/posts/:id/comments', async (req, res) => {
         createdAtValue = createdAtDate.toISOString();
       }
 
-      // Add 1 hour (3600000 ms) to compensate for timezone offset
-      createdAtDate = new Date(createdAtDate.getTime() + 3600000);
-      createdAtValue = createdAtDate.toISOString();
+      // Add 1 hour (3600000 ms) to compensate for timezone offset in local development
+      // Azure doesn't need the offset, but local does
+      // if (process.env.NODE_ENV !== 'production') {
+      //   createdAtDate = new Date(createdAtDate.getTime() + 3600000);
+      //   createdAtValue = createdAtDate.toISOString();
+      // } else {
+        createdAtValue = createdAtDate.toISOString();
+      // }
 
       return {
         id: comment.id,
@@ -1090,6 +1126,17 @@ app.post('/api/posts/:id/comments', async (req, res) => {
       hasText: !!comment.text,
     });
 
+    // Track custom metric: comments added
+    if (telemetryClient) {
+      telemetryClient.trackMetric({
+        name: 'Comments Added',
+        value: 1
+      });
+      telemetryClient.trackEvent({
+        name: 'Comment Added'
+      });
+    }
+
     // Fetch user data separately to ensure we have the correct username
     const { data: userData, error: userError } = await db
       .from('users')
@@ -1131,7 +1178,7 @@ app.post('/api/posts/:id/comments', async (req, res) => {
     }
 
     // Add 1 hour (3600000 ms) to compensate for timezone offset
-    createdAtDate = new Date(createdAtDate.getTime() + 3600000);
+    createdAtDate = new Date(createdAtDate.getTime());
     createdAtValue = createdAtDate.toISOString();
 
     // Get username and avatar from user data
@@ -1553,6 +1600,18 @@ app.post('/api/posts', async (req, res) => {
     }
 
     console.log('Post created successfully:', data.id);
+
+    // Track custom metric: posts created
+    if (telemetryClient) {
+      console.log('📊 Tracking post metric and event...');
+      telemetryClient.trackMetric({
+        name: 'Posts Created',
+        value: 1
+      });
+      telemetryClient.trackEvent({
+        name: 'Post Created'
+      });
+    }
 
     // Handle case where .single() might return an array
     const post = Array.isArray(data) ? data[0] : data;
