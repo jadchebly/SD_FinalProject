@@ -1619,7 +1619,6 @@ app.post('/api/posts', async (req, res) => {
 
     // Track custom metric: posts created
     if (telemetryClient) {
-      console.log('📊 Tracking post metric and event...');
       telemetryClient.trackMetric({
         name: 'Posts Created',
         value: 1
