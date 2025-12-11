@@ -185,9 +185,6 @@ jobs:
       (needs.prepare.outputs.is-staging == 'true' || needs.prepare.outputs.is-production == 'true') &&
       needs.test.result == 'success'
 
-    environment:
-      name: ${{ needs.prepare.outputs.environment }}
-
     permissions:
       contents: read
       id-token: write
