@@ -9,7 +9,7 @@ name: CD Pipeline
 
 on:
   push:
-    branches: [main, staging]
+    branches: [main, staging, dev]
   workflow_dispatch:
 
 # Prevent concurrent deployments to the same environment
@@ -43,7 +43,7 @@ jobs:
       - name: Determine environment
         id: check
         run: |
-          if [ "${{ github.ref }}" == "refs/heads/staging" ]; then
+          if [ "${{ github.ref }}" == "refs/heads/staging" ] || [ "${{ github.ref }}" == "refs/heads/dev" ]; then
             echo "is_staging=true" >> $GITHUB_OUTPUT
             echo "is_production=false" >> $GITHUB_OUTPUT
             echo "environment=staging" >> $GITHUB_OUTPUT
@@ -226,8 +226,17 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_7DEFE22AC09940F2BA10BC4EE35000B8 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_114DC0FB5F604A5E83C8EBF55385CCDF }}
 
-      - name: 'Deploy to Azure Web App'
-        id: deploy-to-webapp
+      - name: 'Deploy to Azure Web App (Staging)'
+        if: needs.prepare.outputs.is-staging == 'true'
+        id: deploy-to-webapp-staging
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'staging-iestagram'  # Staging backend app name
+          package: .
+
+      - name: 'Deploy to Azure Web App (Production)'
+        if: needs.prepare.outputs.is-production == 'true'
+        id: deploy-to-webapp-production
         uses: azure/webapps-deploy@v3
         with:
           app-name: 'IEstagram'
