@@ -20,11 +20,13 @@ A full-stack social media application built with React and Express, featuring us
 ### Frontend
 - **React 19** - UI library
 - **TypeScript** - Type safety
-- **Vite** - Build tool and dev server
+- **Vite** - Build tool and dev server with fast HMR (Hot Module Replacement)
 - **React Router** - Client-side routing
 - **TailwindCSS** - Utility-first CSS framework
+- **DaisyUI** - Tailwind CSS component library
 - **React Icons** - Icon library
 - **Vitest** - Testing framework
+- **Testing Library** - React component testing utilities
 
 ### Backend
 - **Node.js** - Runtime environment
@@ -33,6 +35,8 @@ A full-stack social media application built with React and Express, featuring us
 - **Supabase** - PostgreSQL database and storage
 - **Multer** - File upload handling
 - **CORS** - Cross-origin resource sharing
+- **Nodemon** - Development server with hot reload
+- **ts-node** - TypeScript execution for Node.js
 
 ### Database & Storage
 - **Supabase (PostgreSQL)** - Relational database
@@ -69,9 +73,17 @@ Before you begin, ensure you have the following installed:
 
 4. **Set up Supabase**
    - Create a new project at [supabase.com](https://supabase.com)
-   - Note down your project URL and API keys
+   - Note down your project URL and API keys:
+     - Project URL: Found in Settings → API
+     - Anon Key: Found in Settings → API (public anon key)
+     - Service Role Key: Found in Settings → API (service_role key - keep this secret!)
    - Set up the required database tables (users, posts, likes, comments, follows)
-   - Create a storage bucket named `posts` for image uploads
+     - You can use the Supabase SQL Editor to create tables with proper schema
+     - Ensure foreign key relationships and cascade delete rules are set up
+   - Create a storage bucket named `posts` for image uploads:
+     - Go to Storage in Supabase dashboard
+     - Create a new bucket named `posts`
+     - Set it to public if you want images to be publicly accessible
 
 ## Environment Variables
 
@@ -105,35 +117,60 @@ VITE_API_URL=http://localhost:3000
 
 ```
 SD_FinalProject/
+├── .github/
+│   └── workflows/
+│       └── ci.yml          # GitHub Actions CI/CD pipeline
 ├── backend/                 # Express API server
 │   ├── src/
-│   │   ├── app.ts          # Main Express application
+│   │   ├── app.ts          # Main Express application with all routes
 │   │   ├── config/
 │   │   │   └── database.ts  # Supabase client configuration
 │   │   └── services/
 │   │       └── uploadService.ts  # Image upload service
 │   ├── package.json
-│   └── tsconfig.json
+│   ├── tsconfig.json
+│   └── .gitignore
 ├── src/                     # React frontend
 │   ├── components/          # Reusable React components
 │   │   ├── Dashboard/       # Dashboard component and Navbar
+│   │   │   ├── Dashboard.tsx
+│   │   │   ├── Dashboard.css
+│   │   │   └── Navbar/
+│   │   │       ├── Navbar.tsx
+│   │   │       └── Navbar.css
 │   │   ├── ProtectedRoute.tsx
-│   │   └── SuggestedUsersModal.tsx
+│   │   ├── SuggestedUsersModal.tsx
+│   │   └── SuggestedUsersModal.css
 │   ├── contexts/
 │   │   └── AuthContext.tsx  # Authentication context
 │   ├── pages/               # Page components
+│   │   ├── __tests__/       # Test files
+│   │   │   ├── Login.test.tsx
+│   │   │   └── SignUp.test.tsx
 │   │   ├── Login.tsx
+│   │   ├── Login.css
 │   │   ├── SignUp.tsx
+│   │   ├── SignUp.css
 │   │   ├── CreatePost.tsx
-│   │   └── Profile.tsx
+│   │   ├── CreatePost.css
+│   │   ├── Profile.tsx
+│   │   └── Profile.css
 │   ├── services/
 │   │   └── api.ts          # API service layer
+│   ├── test/
+│   │   └── setup.ts        # Test configuration
 │   ├── types/
 │   │   └── Post.ts         # TypeScript type definitions
 │   ├── App.tsx             # Main App component
-│   └── main.tsx            # Application entry point
+│   ├── main.tsx            # Application entry point
+│   └── style.css           # Global styles
+├── public/                  # Static assets
+├── coverage/                # Test coverage reports (generated)
 ├── package.json
-├── vite.config.ts
+├── vite.config.ts          # Vite configuration with test setup
+├── tailwind.config.js      # TailwindCSS configuration
+├── tsconfig.json
+├── .gitignore
 └── README.md
 ```
 
@@ -152,11 +189,19 @@ npm run dev
 
 The backend server will start on `http://localhost:3000` (or the port specified in your `.env` file).
 
-You should see output like:
-```
-Server running on http://localhost:3000
-Health check: http://localhost:3000/health
-```
+**What to expect:**
+- You should see output like:
+  ```
+  Server running on http://localhost:3000
+  Health check: http://localhost:3000/health
+  Database test: http://localhost:3000/test-db
+  ```
+- The server uses **nodemon** for hot reload, so any changes to backend files will automatically restart the server
+- If you see errors about missing environment variables, check your `backend/.env` file
+
+**Verify backend is running:**
+- Open `http://localhost:3000/health` in your browser
+- You should see: `{"status":"ok","message":"Backend is running!"}`
 
 ### Step 2: Start the Frontend Development Server
 
@@ -166,7 +211,20 @@ Open a **new terminal** (keep the backend running) and navigate to the project r
 npm run dev
 ```
 
-The frontend will start on `http://localhost:5173` (or another available port).
+The frontend will start on `http://localhost:5173` (or another available port if 5173 is taken).
+
+**What to expect:**
+- You should see output like:
+  ```
+  VITE v7.x.x  ready in xxx ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ```
+- The frontend uses **Vite** for fast HMR (Hot Module Replacement), so changes will appear instantly in the browser
+- If you see errors about API connection, verify that:
+  - Backend is running on port 3000
+  - `VITE_API_URL` in your root `.env` file matches the backend URL
 
 ### Step 3: Access the Application
 
@@ -180,14 +238,70 @@ You should see the login page. From here, you can:
 - Log in with existing credentials
 - Access the dashboard and other features
 
+## Testing
+
+The project uses **Vitest** as the testing framework with React Testing Library for component testing.
+
+### Running Tests
+
+All test commands should be run from the **project root directory**:
+
+#### Run all tests once:
+```bash
+npm test
+```
+This runs all tests and exits. Use this for CI/CD or when you want a quick test run.
+
+#### Run tests in watch mode:
+```bash
+npm run test:watch
+```
+This runs tests in watch mode - tests will re-run automatically when you change files. This is ideal for development.
+
+#### Run tests with coverage report:
+```bash
+npm run test:coverage
+```
+This runs all tests and generates a coverage report showing:
+- Line coverage
+- Function coverage
+- Branch coverage
+- Statement coverage
+
+Coverage reports are generated in the `coverage/` directory. Open `coverage/index.html` in your browser to view a detailed HTML report.
+
+#### Open Vitest UI:
+```bash
+npm run test:ui
+```
+This opens an interactive test UI in your browser where you can:
+- See all tests
+- Run individual tests
+- View test results and coverage
+- Debug test failures
+
+### Test Files Location
+
+Test files are located in:
+- `src/pages/__tests__/` - Page component tests
+  - `Login.test.tsx`
+  - `SignUp.test.tsx`
+
+### Test Configuration
+
+- Test framework: Vitest with jsdom environment
+- Test setup file: `src/test/setup.ts`
+- Test files pattern: `**/*.{test,spec}.{js,ts,jsx,tsx}`
+- Coverage provider: v8
+
 ## Available Scripts
 
 ### Frontend Scripts
 
-Run these commands from the project root:
+Run these commands from the **project root**:
 
-- `npm run dev` - Start the Vite development server
-- `npm run build` - Build the application for production
+- `npm run dev` - Start the Vite development server with HMR
+- `npm run build` - Build the application for production (TypeScript compilation + Vite build)
 - `npm run preview` - Preview the production build locally
 - `npm test` - Run tests once
 - `npm run test:watch` - Run tests in watch mode
@@ -196,11 +310,15 @@ Run these commands from the project root:
 
 ### Backend Scripts
 
-Run these commands from the `backend/` directory:
+Run these commands from the **`backend/` directory**:
 
-- `npm run dev` - Start the development server with hot reload (nodemon)
+- `npm run dev` - Start the development server with hot reload (nodemon + ts-node)
+  - Automatically restarts on file changes
+  - Runs TypeScript directly without compilation
 - `npm run build` - Compile TypeScript to JavaScript
+  - Output goes to `backend/dist/` directory
 - `npm start` - Start the production server (requires build first)
+  - Runs the compiled JavaScript from `dist/app.js`
 
 ## Project Flows
 
@@ -287,6 +405,8 @@ Run these commands from the `backend/` directory:
 
 ## API Endpoints
 
+All API endpoints are prefixed with `/api/` and run on the backend server (default: `http://localhost:3000`).
+
 ### Authentication
 
 - `POST /api/signup` - Create a new user account
@@ -298,50 +418,54 @@ Run these commands from the `backend/` directory:
   - Returns: `{ success: true, user: { id, username, email, avatar } }`
 
 - `GET /api/me` - Get current user information
-  - Headers: `x-user-id: <user_id>`
-  - Returns: `{ success: true, user: { ... } }`
+  - Headers: `x-user-id: <user_id>` (optional, can also use session cookie)
+  - Returns: `{ success: true, user: { ... } }` or `{ success: true, user: null }`
 
 - `POST /api/logout` - Logout user (client-side, clears localStorage)
+  - Returns: `{ success: true }`
 
 ### Posts
 
 - `GET /api/feed` - Get user's personalized feed
-  - Headers: `x-user-id: <user_id>`
+  - Headers: `x-user-id: <user_id>` (required)
   - Returns: `{ success: true, posts: [...] }`
+  - Returns posts from followed users + own posts, sorted by most recent
 
 - `GET /api/posts` - Get all posts (optionally filtered by user)
   - Query params: `?user_id=<user_id>` (optional)
   - Returns: `{ success: true, posts: [...] }`
 
 - `POST /api/posts` - Create a new post
-  - Headers: `x-user-id: <user_id>`
+  - Headers: `x-user-id: <user_id>` (required)
   - Body: `{ title, content, type, image_url?, video_url?, user_id, username }`
   - Returns: `{ success: true, post: { ... } }`
 
 - `PUT /api/posts/:id` - Update a post
-  - Headers: `x-user-id: <user_id>`
+  - Headers: `x-user-id: <user_id>` (required)
   - Body: `{ title, content }`
   - Returns: `{ success: true, post: { ... } }`
+  - Note: Only the post owner can update their posts
 
 - `DELETE /api/posts/:id` - Delete a post
-  - Headers: `x-user-id: <user_id>`
+  - Headers: `x-user-id: <user_id>` (required)
   - Returns: `{ success: true, message: 'Post deleted successfully' }`
+  - Note: Only the post owner can delete their posts. Also deletes associated image from storage.
 
 ### Interactions
 
 - `POST /api/posts/:id/like` - Like a post
-  - Headers: `x-user-id: <user_id>`
+  - Headers: `x-user-id: <user_id>` (required)
   - Returns: `{ success: true, message: 'Post liked' }`
 
 - `DELETE /api/posts/:id/like` - Unlike a post
-  - Headers: `x-user-id: <user_id>`
+  - Headers: `x-user-id: <user_id>` (required)
   - Returns: `{ success: true, message: 'Post unliked' }`
 
 - `GET /api/posts/:id/comments` - Get comments for a post
   - Returns: `{ success: true, comments: [...] }`
 
 - `POST /api/posts/:id/comments` - Add a comment to a post
-  - Headers: `x-user-id: <user_id>`
+  - Headers: `x-user-id: <user_id>` (required)
   - Body: `{ text }`
   - Returns: `{ success: true, comment: { ... } }`
 
@@ -354,35 +478,39 @@ Run these commands from the `backend/` directory:
 - `GET /api/users/search/:query` - Search users by username
   - Headers: `x-user-id: <user_id>` (optional)
   - Returns: `{ success: true, users: [...] }`
+  - Returns up to 10 matching users
 
 - `GET /api/users/suggested` - Get suggested users to follow
-  - Headers: `x-user-id: <user_id>`
+  - Headers: `x-user-id: <user_id>` (required)
   - Returns: `{ success: true, users: [...] }`
+  - Returns up to 5 suggested users (excluding current user and already followed users)
 
 - `GET /api/users/:id/followers` - Get user's followers
-  - Returns: `{ success: true, followers: [...] }`
+  - Returns: `{ success: true, users: [...] }`
 
 - `GET /api/users/:id/following` - Get users that a user follows
-  - Returns: `{ success: true, following: [...] }`
+  - Returns: `{ success: true, users: [...] }`
 
 - `PUT /api/users/:id/avatar` - Update user avatar
-  - Headers: `x-user-id: <user_id>`
+  - Headers: `x-user-id: <user_id>` (required)
   - Body: `{ avatar_url }`
   - Returns: `{ success: true, user: { ... } }`
+  - Note: Only the user can update their own avatar
 
 ### Following
 
 - `POST /api/follow/:userId` - Follow a user
-  - Headers: `x-user-id: <follower_id>`
+  - Headers: `x-user-id: <follower_id>` (required)
   - Returns: `{ success: true, message: 'User followed successfully' }`
+  - Note: Cannot follow yourself
 
 - `DELETE /api/follow/:userId` - Unfollow a user
-  - Headers: `x-user-id: <follower_id>`
+  - Headers: `x-user-id: <follower_id>` (required)
   - Returns: `{ success: true, message: 'User unfollowed successfully' }`
 
 - `GET /api/following` - Get list of users the current user follows
-  - Headers: `x-user-id: <user_id>`
-  - Returns: `{ success: true, following: [...] }`
+  - Headers: `x-user-id: <user_id>` (required)
+  - Returns: `{ success: true, following: [...] }` (array of user IDs)
 
 ### File Upload
 
@@ -391,14 +519,17 @@ Run these commands from the `backend/` directory:
   - Body: FormData with `image` field
   - Returns: `{ success: true, url: <public_url>, path: <storage_path> }`
   - File size limit: 5MB
+  - Allowed types: JPEG, JPG, PNG, GIF, WEBP
 
 ### Health & Testing
 
 - `GET /health` - Health check endpoint
   - Returns: `{ status: 'ok', message: 'Backend is running!' }`
+  - Use this to verify the backend server is running
 
 - `GET /test-db` - Test Supabase database connection
   - Returns: `{ success: true, database: 'connected', message: '...' }`
+  - Use this to verify database connectivity
 
 ### Authentication Headers
 
@@ -410,3 +541,95 @@ x-user-id: <user_id>
 
 This header is automatically added by the frontend API service when a user is logged in.
 
+**Alternative Authentication**: The backend also supports session cookies (`sid`) for authentication. When a user logs in or signs up, a session cookie is set that can be used for subsequent requests. The `GET /api/me` endpoint will check for either the `x-user-id` header or the `sid` cookie.
+
+## Database Schema
+
+The application uses the following Supabase tables:
+
+- **users**: User accounts with username, email, password_hash, and avatar_url
+- **posts**: User posts with title, content, type, image_url, video_url, and timestamps
+- **likes**: Post likes (user_id, post_id)
+- **comments**: Post comments (user_id, post_id, text, timestamps)
+- **follows**: User following relationships (follower_id, following_id)
+
+All tables include proper foreign key constraints and cascade delete rules for data integrity.
+
+## Troubleshooting
+
+### Common Issues
+
+#### Backend won't start:
+- **Check environment variables**: Ensure all required variables are set in `backend/.env`
+  - `SUPABASE_URL`
+  - `SUPABASE_ANON_KEY`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+  - `PORT` (optional, defaults to 3000)
+- **Verify Supabase credentials**: Check that your Supabase project URL and keys are correct
+- **Check Node.js version**: Verify Node.js version is 18 or higher: `node --version`
+- **Port already in use**: If port 3000 is taken, change `PORT` in `backend/.env` or stop the process using that port
+
+#### Frontend can't connect to backend:
+- **Verify backend is running**: Check that backend server is running on port 3000
+  - Visit `http://localhost:3000/health` in your browser
+- **Check environment variable**: Verify `VITE_API_URL` in root `.env` matches backend URL
+  - Should be: `VITE_API_URL=http://localhost:3000`
+- **Check CORS configuration**: Backend CORS is configured to allow `http://localhost:5173`
+- **Restart frontend**: After changing `.env` file, restart the Vite dev server
+
+#### Image uploads fail:
+- **Verify Supabase Storage bucket**: Ensure bucket named `posts` exists in Supabase
+- **Check file size**: Verify file is under 5MB limit
+- **Check file type**: Only JPEG, JPG, PNG, GIF, WEBP are allowed
+- **Verify permissions**: Ensure Supabase service role key has proper storage permissions
+- **Check bucket settings**: Storage bucket should be configured correctly in Supabase dashboard
+
+#### Database connection errors:
+- **Test connection**: Use `GET /test-db` endpoint: `http://localhost:3000/test-db`
+- **Verify Supabase project**: Check that Supabase project is active (not paused)
+- **Check credentials**: Verify `SUPABASE_URL` and `SUPABASE_ANON_KEY` are correct
+- **Check tables**: Ensure database tables are created with correct schema
+- **Check RLS policies**: Verify Row Level Security policies allow necessary operations
+
+#### Tests fail:
+- **Install dependencies**: Run `npm install` to ensure all dependencies are installed
+- **Clear and reinstall**: If dependency issues persist:
+  ```bash
+  rm -rf node_modules package-lock.json
+  npm install
+  ```
+- **Check test environment**: Ensure test setup file exists at `src/test/setup.ts`
+- **Verify test files**: Check that test files are in correct location (`src/pages/__tests__/`)
+
+#### Port conflicts:
+- **Backend port (3000)**: Change `PORT` in `backend/.env` file
+- **Frontend port (5173)**: Vite will automatically use the next available port, or specify with `npm run dev -- --port 5174`
+
+#### TypeScript errors:
+- **Check TypeScript version**: Ensure TypeScript is installed and up to date
+- **Run type check**: `npx tsc --noEmit` to check for type errors
+- **Restart dev server**: Sometimes TypeScript errors clear after restart
+
+## Security Notes
+
+⚠️ **Important**: This project is configured for development purposes. The following security considerations apply:
+
+- **Password Storage**: Passwords are currently stored as plain text (NOT SECURE). In production, use bcrypt or similar hashing libraries.
+- **CORS**: Configured to allow localhost origins. Update CORS settings in `backend/src/app.ts` for production deployment.
+- **Environment Variables**: Never commit `.env` files. They are already in `.gitignore`.
+- **API Keys**: Keep Supabase service role key secure and never expose it to the frontend.
+- **Authentication**: Currently uses simple header-based authentication. Consider implementing JWT tokens for production.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+Ensure all tests pass before submitting PRs.
+
+## License
+
+This project is part of a final project for Software Development coursework.
