@@ -1,0 +1,482 @@
+# CD Pipeline for IEstagram
+# Complete CI/CD pipeline with testing, Azure deployments, and smoke tests
+#
+# Branch mapping:
+# - staging branch → staging environment
+# - main branch → production environment
+
+name: CD Pipeline
+
+on:
+  push:
+    branches: [main, staging, dev]
+  workflow_dispatch:
+
+# Prevent concurrent deployments to the same environment
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "20.x"
+
+jobs:
+  # ============================================
+  # PHASE 1: PREPARATION
+  # ============================================
+
+  prepare:
+    name: Prepare Pipeline
+    runs-on: ubuntu-latest
+    outputs:
+      short-sha: ${{ steps.vars.outputs.short_sha }}
+      is-staging: ${{ steps.check.outputs.is_staging }}
+      is-production: ${{ steps.check.outputs.is_production }}
+      environment: ${{ steps.check.outputs.environment }}
+
+    steps:
+      - name: Set variables
+        id: vars
+        run: |
+          echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: Determine environment
+        id: check
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/staging" ] || [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+            echo "is_staging=true" >> $GITHUB_OUTPUT
+            echo "is_production=false" >> $GITHUB_OUTPUT
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "is_staging=false" >> $GITHUB_OUTPUT
+            echo "is_production=true" >> $GITHUB_OUTPUT
+            echo "environment=production" >> $GITHUB_OUTPUT
+          else
+            echo "is_staging=false" >> $GITHUB_OUTPUT
+            echo "is_production=false" >> $GITHUB_OUTPUT
+            echo "environment=unknown" >> $GITHUB_OUTPUT
+          fi
+
+  # ============================================
+  # PHASE 2: TESTING
+  # ============================================
+
+  test:
+    name: Test (Frontend & Backend)
+    runs-on: ubuntu-latest
+    needs: prepare
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      # Frontend tests
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests with coverage
+        run: npm run test:coverage
+        env:
+          CI: true
+
+      - name: Upload frontend test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-test-results
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # Backend tests
+      - name: Setup Node.js for backend
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Run backend tests
+        working-directory: ./backend
+        run: npm test
+
+      - name: Upload backend test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-test-results
+          path: backend/coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ============================================
+  # PHASE 3: SECURITY SCAN (Code)
+  # ============================================
+
+  security-scan-code:
+    name: Security Scan (Code)
+    runs-on: ubuntu-latest
+    needs: prepare
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run npm audit (frontend)
+        run: |
+          npm audit --audit-level=moderate --json > npm-audit-frontend.json || true
+          npm audit --audit-level=moderate || true
+
+      - name: Setup Node.js for backend
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Run npm audit (backend)
+        working-directory: ./backend
+        run: |
+          npm audit --audit-level=moderate --json > npm-audit-backend.json || true
+          npm audit --audit-level=moderate || true
+
+      - name: Upload security results
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-code
+          path: |
+            npm-audit-frontend.json
+            backend/npm-audit-backend.json
+          if-no-files-found: ignore
+
+  # ============================================
+  # PHASE 4: DEPLOY BACKEND
+  # ============================================
+
+  deploy-backend:
+    name: Deploy Backend to Azure
+    runs-on: ubuntu-latest
+    needs: [prepare, test]
+    if: |
+      github.event_name == 'push' &&
+      (needs.prepare.outputs.is-staging == 'true' || needs.prepare.outputs.is-production == 'true') &&
+      needs.test.result == 'success'
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js version
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20.x'
+
+      - name: npm install, build, and test (backend)
+        working-directory: ./backend
+        run: |
+          npm install
+          npm run build
+          npm run test --if-present
+
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-app
+          path: ./backend
+
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: node-app
+      
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: 'Deploy to Azure Web App (Staging)'
+        if: needs.prepare.outputs.is-staging == 'true'
+        id: deploy-to-webapp-staging
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'staging-iestagram'  # Staging backend app name
+          package: .
+
+      - name: 'Deploy to Azure Web App (Production)'
+        if: needs.prepare.outputs.is-production == 'true'
+        id: deploy-to-webapp-production
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'IEstagram'
+          slot-name: 'Production'
+          package: .
+
+      - name: Record deployment
+        run: |
+          echo "### Backend Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ needs.prepare.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Deployed" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # PHASE 5: DEPLOY FRONTEND
+  # ============================================
+
+  deploy-frontend:
+    name: Deploy Frontend to Azure
+    runs-on: ubuntu-latest
+    needs: [prepare, test, deploy-backend]
+    if: |
+      github.event_name == 'push' &&
+      (needs.prepare.outputs.is-staging == 'true' || needs.prepare.outputs.is-production == 'true') &&
+      needs.test.result == 'success' &&
+      needs.deploy-backend.result == 'success'
+
+    environment:
+      name: ${{ needs.prepare.outputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Wait for backend to be ready
+        run: |
+          if [ "${{ needs.prepare.outputs.is-production }}" == "true" ]; then
+            BACKEND_URL="${{ secrets.VITE_BACKEND_URL_PRODUCTION }}"
+          else
+            BACKEND_URL="${{ secrets.VITE_BACKEND_URL_STAGING || secrets.VITE_BACKEND_URL_PRODUCTION }}"
+          fi
+          echo "Waiting for backend to be ready at: $BACKEND_URL"
+          max_attempts=30
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f -s "$BACKEND_URL/health" > /dev/null 2>&1; then
+              echo "Backend is ready!"
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts: Backend not ready yet, waiting 10 seconds..."
+            sleep 10
+          done
+          echo "Warning: Backend health check timed out, but continuing with build..."
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        env:
+          VITE_BACKEND_URL_PRODUCTION: ${{ secrets.VITE_BACKEND_URL_PRODUCTION }}
+          VITE_BACKEND_URL_STAGING: ${{ secrets.VITE_BACKEND_URL_STAGING }}
+          NODE_ENV: production
+        run: |
+          if [ "${{ needs.prepare.outputs.is-production }}" == "true" ]; then
+            if [ -z "$VITE_BACKEND_URL_PRODUCTION" ]; then
+              echo "❌ ERROR: VITE_BACKEND_URL_PRODUCTION is not set!"
+              exit 1
+            fi
+            echo "✅ Building for production with VITE_BACKEND_URL_PRODUCTION"
+            export VITE_BACKEND_URL_PRODUCTION="$VITE_BACKEND_URL_PRODUCTION"
+            echo "VITE_BACKEND_URL_PRODUCTION=$VITE_BACKEND_URL_PRODUCTION" > .env.production
+          else
+            BACKEND_URL="${VITE_BACKEND_URL_STAGING:-$VITE_BACKEND_URL_PRODUCTION}"
+            if [ -z "$BACKEND_URL" ]; then
+              echo "❌ ERROR: VITE_BACKEND_URL_STAGING or VITE_BACKEND_URL_PRODUCTION is not set!"
+              exit 1
+            fi
+            echo "✅ Building for staging with backend URL"
+            export VITE_BACKEND_URL_PRODUCTION="$BACKEND_URL"
+            echo "VITE_BACKEND_URL_PRODUCTION=$BACKEND_URL" > .env.production
+          fi
+          echo "NODE_ENV=production" >> .env.production
+          npm run build
+
+      - name: Build And Deploy
+        id: builddeploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ needs.prepare.outputs.is-production == 'true' && secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_NICE_MUSHROOM_01D502303 || secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PROUD_ROCK_02C383903 }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "/"
+          api_location: ""
+          output_location: "dist"
+
+      - name: Record deployment
+        run: |
+          echo "### Frontend Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ needs.prepare.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Deployed" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # PHASE 6: SMOKE TESTS
+  # ============================================
+
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy-backend, deploy-frontend]
+    if: |
+      github.event_name == 'push' &&
+      (needs.prepare.outputs.is-staging == 'true' || needs.prepare.outputs.is-production == 'true') &&
+      needs.deploy-backend.result == 'success' &&
+      needs.deploy-frontend.result == 'success'
+
+    steps:
+      - name: Set environment URLs
+        id: urls
+        run: |
+          if [ "${{ needs.prepare.outputs.is-production }}" == "true" ]; then
+            BACKEND_URL="${{ secrets.VITE_BACKEND_URL_PRODUCTION }}"
+            FRONTEND_URL="${{ secrets.PRODUCTION_FRONTEND_URL }}"
+          else
+            BACKEND_URL="${{ secrets.VITE_BACKEND_URL_STAGING }}"
+            FRONTEND_URL="${{ secrets.STAGING_FRONTEND_URL }}"
+          fi
+          echo "backend_url=$BACKEND_URL" >> $GITHUB_OUTPUT
+          echo "frontend_url=$FRONTEND_URL" >> $GITHUB_OUTPUT
+          echo "Backend URL: $BACKEND_URL"
+          echo "Frontend URL: $FRONTEND_URL"
+
+      - name: Wait for services to stabilize
+        run: sleep 15
+
+      - name: Test backend health endpoint
+        run: |
+          BACKEND_URL="${{ steps.urls.outputs.backend_url }}"
+          echo "Testing backend health at: $BACKEND_URL/health"
+          max_attempts=5
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f -s "$BACKEND_URL/health" > /dev/null 2>&1; then
+              echo "✅ Backend health check passed!"
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts: Backend not responding, retrying in 5 seconds..."
+            sleep 5
+          done
+          echo "❌ Backend health check failed after $max_attempts attempts"
+          exit 1
+
+      - name: Test frontend availability
+        run: |
+          FRONTEND_URL="${{ steps.urls.outputs.frontend_url }}"
+          echo "Testing frontend at: $FRONTEND_URL"
+          max_attempts=5
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f -s "$FRONTEND_URL" > /dev/null 2>&1; then
+              echo "✅ Frontend is accessible!"
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts: Frontend not responding, retrying in 5 seconds..."
+            sleep 5
+          done
+          echo "❌ Frontend check failed after $max_attempts attempts"
+          exit 1
+
+      - name: Record smoke test results
+        run: |
+          echo "### Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ needs.prepare.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backend:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # PHASE 7: NOTIFICATION & SUMMARY
+  # ============================================
+
+  notify:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs:
+      [
+        prepare,
+        test,
+        security-scan-code,
+        deploy-backend,
+        deploy-frontend,
+        smoke-tests,
+      ]
+    if: always()
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\` (\`${{ needs.prepare.outputs.short-sha }}\`)" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** \`${{ needs.prepare.outputs.environment }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Actor:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Scan | ${{ needs.security-scan-code.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Backend | ${{ needs.deploy-backend.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Frontend | ${{ needs.deploy-frontend.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Smoke Tests | ${{ needs.smoke-tests.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Determine overall status
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "### ❌ Pipeline Failed: Tests" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          elif [ "${{ needs.deploy-backend.result }}" != "success" ] && [ "${{ needs.deploy-backend.result }}" != "skipped" ]; then
+            echo "### ❌ Pipeline Failed: Backend Deployment" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          elif [ "${{ needs.deploy-frontend.result }}" != "success" ] && [ "${{ needs.deploy-frontend.result }}" != "skipped" ]; then
+            echo "### ❌ Pipeline Failed: Frontend Deployment" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          elif [ "${{ needs.smoke-tests.result }}" != "success" ] && [ "${{ needs.smoke-tests.result }}" != "skipped" ]; then
+            echo "### ❌ Pipeline Failed: Smoke Tests" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          elif [ "${{ needs.deploy-backend.result }}" == "success" ] && [ "${{ needs.deploy-frontend.result }}" == "success" ] && [ "${{ needs.smoke-tests.result }}" == "success" ]; then
+            echo "### ✅ Pipeline Succeeded" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All stages completed successfully!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ Pipeline Partially Completed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Some stages were skipped or did not run." >> $GITHUB_STEP_SUMMARY
+          fi
+

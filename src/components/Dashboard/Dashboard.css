@@ -223,6 +223,18 @@
   color: #333;
 }
 
+.comment-count {
+  font-size: 14px;
+  font-weight: 500;
+  color: #666;
+  min-width: 18px;
+  text-align: center;
+}
+
+.comment-button:hover .comment-count {
+  color: #333;
+}
+
 .delete-button {
   display: flex;
   align-items: center;

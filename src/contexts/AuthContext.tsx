@@ -97,7 +97,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
       api.setAuthHeaderProvider(() => {
         // If you later switch to HttpOnly cookies, return {} here.
-        return { ...(user && user.id ? { 'x-user-id': user.id } : {}) };
+        const headers = { ...(user && user.id ? { 'x-user-id': user.id } : {}) };
+        if (import.meta.env.PROD && user) {
+          console.log('[Auth] Setting auth headers, user.id:', user.id);
+        }
+        return headers;
       });
 
       api.setCurrentUserProvider(() => user);
@@ -123,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         setUser(userData);
         localStorage.setItem('user', JSON.stringify(userData));
+        console.log('[Auth] User set after login:', userData.id);
 
         // Refresh following list for the authenticated user
         try {
@@ -153,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         setUser(userData);
         localStorage.setItem('user', JSON.stringify(userData));
+        console.log('[Auth] User set after signup:', userData.id);
 
         // new users start with empty following
         setFollowingList([]);
@@ -189,7 +195,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     try {
       console.log('Updating avatar for user:', user.id);
-      // Update avatar in Supabase
       const response = await api.updateUserAvatar(user.id, avatar);
       console.log('Avatar update response:', response);
       
@@ -211,7 +216,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('user', JSON.stringify(updatedUser));
       }
     } catch (error) {
-      console.error('Failed to update avatar in Supabase:', error);
+      console.error('Failed to update avatar in db:', error);
       // Fallback: update local state even if API call fails
       const updatedUser = { ...user, avatar };
       setUser(updatedUser);

@@ -14,7 +14,7 @@ export default defineConfig({
     // Handle ESM compatibility
     server: {
       deps: {
-        inline: ['parse5'],
+        inline: ['parse5', 'socket.io-client'],
       },
     },
     coverage: {

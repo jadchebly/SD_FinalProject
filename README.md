@@ -12,7 +12,8 @@ A full-stack social media application built with React and Express, featuring us
 - **Feed Filtering**: Sort posts by most recent or most liked
 - **Search**: Search posts by title or content
 - **User Profiles**: View user profiles with follower/following counts
-- **Image Uploads**: Upload images to Supabase Storage (5MB limit)
+- **Image Uploads**: Upload images to AWS S3 (5MB limit)
+- **Real-time Updates**: Socket.io-powered real-time updates for comments, likes, and new posts
 - **Real-time Updates**: Feed automatically refreshes when following relationships change
 
 ## Technology Stack
@@ -25,6 +26,8 @@ A full-stack social media application built with React and Express, featuring us
 - **TailwindCSS** - Utility-first CSS framework
 - **DaisyUI** - Tailwind CSS component library
 - **React Icons** - Icon library
+- **Socket.io Client** - Real-time communication with backend
+- **Timeago React** - Relative time formatting
 - **Vitest** - Testing framework
 - **Testing Library** - React component testing utilities
 
@@ -32,15 +35,20 @@ A full-stack social media application built with React and Express, featuring us
 - **Node.js** - Runtime environment
 - **Express** - Web framework
 - **TypeScript** - Type safety
-- **Supabase** - PostgreSQL database and storage
+- **PostgreSQL** - Relational database (via `pg` library)
+- **AWS S3** - Image file storage
+- **AWS Secrets Manager** - Secure credential management
+- **Socket.io** - Real-time bidirectional communication
 - **Multer** - File upload handling
 - **CORS** - Cross-origin resource sharing
 - **Nodemon** - Development server with hot reload
 - **ts-node** - TypeScript execution for Node.js
+- **Application Insights** - Azure telemetry and monitoring (optional)
 
 ### Database & Storage
-- **Supabase (PostgreSQL)** - Relational database
-- **Supabase Storage** - Image file storage
+- **PostgreSQL** - Relational database (supports AWS RDS, Azure PostgreSQL, or local PostgreSQL)
+- **AWS S3** - Image file storage
+- **Socket.io** - Real-time updates for likes, comments, and new posts
 
 ## Prerequisites
 
@@ -49,7 +57,13 @@ Before you begin, ensure you have the following installed:
 - **Node.js** (version 18 or higher) - [Download](https://nodejs.org/)
 - **npm** (comes with Node.js) or **yarn**
 - **Git** - [Download](https://git-scm.com/)
-- **Supabase Account** - [Sign up](https://supabase.com/) (free tier is sufficient)
+- **PostgreSQL Database** - Either:
+  - Local PostgreSQL installation, or
+  - AWS RDS PostgreSQL instance, or
+  - Azure PostgreSQL instance
+- **AWS Account** (for S3 storage) - [Sign up](https://aws.amazon.com/) (free tier available)
+  - AWS S3 bucket for image storage
+  - Optional: AWS Secrets Manager for database credentials
 
 ## Installation
 
@@ -71,19 +85,17 @@ Before you begin, ensure you have the following installed:
    cd ..
    ```
 
-4. **Set up Supabase**
-   - Create a new project at [supabase.com](https://supabase.com)
-   - Note down your project URL and API keys:
-     - Project URL: Found in Settings → API
-     - Anon Key: Found in Settings → API (public anon key)
-     - Service Role Key: Found in Settings → API (service_role key - keep this secret!)
-   - Set up the required database tables (users, posts, likes, comments, follows)
-     - You can use the Supabase SQL Editor to create tables with proper schema
-     - Ensure foreign key relationships and cascade delete rules are set up
-   - Create a storage bucket named `posts` for image uploads:
-     - Go to Storage in Supabase dashboard
-     - Create a new bucket named `posts`
-     - Set it to public if you want images to be publicly accessible
+4. **Set up Database**
+   - Set up a PostgreSQL database (local, AWS RDS, or Azure PostgreSQL)
+   - Create the required database tables (users, posts, likes, comments, follows)
+   - Ensure foreign key relationships and cascade delete rules are set up
+   - See Database Schema section for table structure
+
+5. **Set up AWS S3 (for image storage)**
+   - Create an AWS S3 bucket for image uploads
+   - Configure bucket policy for public read access (if needed)
+   - Note down your AWS region, bucket name, and credentials
+   - Optional: Set up IAM role for EC2/Lambda if deploying to AWS
 
 ## Environment Variables
 
@@ -92,14 +104,45 @@ Before you begin, ensure you have the following installed:
 Create a `.env` file in the `backend/` directory:
 
 ```env
-# Supabase Configuration
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+# Database Configuration (choose one option)
+
+# Option 1: Direct PostgreSQL connection
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=your_database_name
+DB_USER=your_database_user
+DB_PASSWORD=your_database_password
+DB_SSL=false
+
+# Option 2: Azure PostgreSQL (for staging)
+# AZURE_POSTGRESQL_HOST=your-azure-postgresql-host.postgres.database.azure.com
+# AZURE_POSTGRESQL_PORT=5432
+# AZURE_POSTGRESQL_DATABASE=your_database_name
+# AZURE_POSTGRESQL_USER=your_azure_user
+# AZURE_POSTGRESQL_PASSWORD=your_azure_password
+# AZURE_POSTGRESQL_SSL=true
+
+# Option 3: AWS RDS with Secrets Manager (for production)
+# DB_SECRET_ARN=arn:aws:secretsmanager:region:account:secret:name
+# AWS_REGION=eu-north-1
+# AWS_ACCESS_KEY_ID=your_aws_access_key (optional if using IAM role)
+# AWS_SECRET_ACCESS_KEY=your_aws_secret_key (optional if using IAM role)
+
+# AWS S3 Configuration
+AWS_REGION=eu-north-1
+AWS_S3_BUCKET_NAME=your-s3-bucket-name
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
 
 # Server Configuration
 PORT=3000
+NODE_ENV=development
 FRONTEND_URL=http://localhost:5173
+FRONTEND_URL_STAGING=http://your-staging-url.azurestaticapps.net
+FRONTEND_URL_PRODUCTION=http://your-production-url.azurestaticapps.net
+
+# Optional: Azure Application Insights (for monitoring)
+# APPLICATIONINSIGHTS_CONNECTION_STRING=your_connection_string
 ```
 
 ### Frontend Configuration
@@ -124,9 +167,9 @@ SD_FinalProject/
 │   ├── src/
 │   │   ├── app.ts          # Main Express application with all routes
 │   │   ├── config/
-│   │   │   └── database.ts  # Supabase client configuration
+│   │   │   └── database.ts  # PostgreSQL database configuration
 │   │   └── services/
-│   │       └── uploadService.ts  # Image upload service
+│   │       └── s3Service.ts  # AWS S3 image upload service
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── .gitignore
@@ -156,7 +199,8 @@ SD_FinalProject/
 │   │   ├── Profile.tsx
 │   │   └── Profile.css
 │   ├── services/
-│   │   └── api.ts          # API service layer
+│   │   ├── api.ts          # API service layer
+│   │   └── socket.ts       # Socket.io client service
 │   ├── test/
 │   │   └── setup.ts        # Test configuration
 │   ├── types/
@@ -315,10 +359,13 @@ Run these commands from the **`backend/` directory**:
 - `npm run dev` - Start the development server with hot reload (nodemon + ts-node)
   - Automatically restarts on file changes
   - Runs TypeScript directly without compilation
+  - Starts both Express server and Socket.io server
 - `npm run build` - Compile TypeScript to JavaScript
   - Output goes to `backend/dist/` directory
 - `npm start` - Start the production server (requires build first)
   - Runs the compiled JavaScript from `dist/app.js`
+- `npm test` - Run backend tests (Jest)
+- `npm run test:s3` - Test S3 connection
 
 ## Project Flows
 
@@ -328,7 +375,7 @@ Run these commands from the **`backend/` directory**:
    - User navigates to `/signup`
    - Enters username, email, and password
    - Frontend sends POST request to `/api/signup`
-   - Backend creates user in Supabase database
+   - Backend creates user in PostgreSQL database
    - User is redirected to dashboard
 
 2. **Login**
@@ -354,7 +401,7 @@ Run these commands from the **`backend/` directory**:
    - For Photo: Upload image or capture from camera
    - For Video: Enter YouTube link
 3. Frontend sends POST request to `/api/posts` with image upload to `/api/upload` if needed
-4. Backend creates post in database and stores image in Supabase Storage
+4. Backend creates post in database and stores image in AWS S3
 5. User is redirected to dashboard to see their new post
 
 ### Feed Interaction Flow
@@ -368,14 +415,16 @@ Run these commands from the **`backend/` directory**:
    - User clicks like button on a post
    - Frontend sends POST request to `/api/posts/:id/like`
    - Backend creates like record in database
-   - UI updates immediately to show new like count
+   - Backend emits Socket.io event to update all clients viewing the post
+   - UI updates immediately to show new like count (via Socket.io event)
 
 3. **Commenting on a Post**
    - User clicks comment button or opens post modal
    - User types comment and submits
    - Frontend sends POST request to `/api/posts/:id/comments`
    - Backend creates comment record
-   - Comment appears in the post's comment section
+   - Backend emits Socket.io event to all clients viewing the post
+   - Comment appears instantly in the post's comment section (via Socket.io event)
 
 4. **Filtering and Sorting**
    - User can toggle between "Most Recent" and "Most Likes"
@@ -449,7 +498,7 @@ All API endpoints are prefixed with `/api/` and run on the backend server (defau
 - `DELETE /api/posts/:id` - Delete a post
   - Headers: `x-user-id: <user_id>` (required)
   - Returns: `{ success: true, message: 'Post deleted successfully' }`
-  - Note: Only the post owner can delete their posts. Also deletes associated image from storage.
+  - Note: Only the post owner can delete their posts. Also deletes associated image from AWS S3.
 
 ### Interactions
 
@@ -514,12 +563,13 @@ All API endpoints are prefixed with `/api/` and run on the backend server (defau
 
 ### File Upload
 
-- `POST /api/upload` - Upload an image file
+- `POST /api/upload` - Upload an image file to AWS S3
   - Content-Type: `multipart/form-data`
   - Body: FormData with `image` field
-  - Returns: `{ success: true, url: <public_url>, path: <storage_path> }`
+  - Returns: `{ success: true, url: <s3_public_url>, path: <storage_path> }`
   - File size limit: 5MB
   - Allowed types: JPEG, JPG, PNG, GIF, WEBP
+  - Images are stored in AWS S3 bucket
 
 ### Health & Testing
 
@@ -527,7 +577,7 @@ All API endpoints are prefixed with `/api/` and run on the backend server (defau
   - Returns: `{ status: 'ok', message: 'Backend is running!' }`
   - Use this to verify the backend server is running
 
-- `GET /test-db` - Test Supabase database connection
+- `GET /test-db` - Test PostgreSQL database connection
   - Returns: `{ success: true, database: 'connected', message: '...' }`
   - Use this to verify database connectivity
 
@@ -545,7 +595,7 @@ This header is automatically added by the frontend API service when a user is lo
 
 ## Database Schema
 
-The application uses the following Supabase tables:
+The application uses the following PostgreSQL tables:
 
 - **users**: User accounts with username, email, password_hash, and avatar_url
 - **posts**: User posts with title, content, type, image_url, video_url, and timestamps
@@ -555,17 +605,32 @@ The application uses the following Supabase tables:
 
 All tables include proper foreign key constraints and cascade delete rules for data integrity.
 
+## Real-time Features (Socket.io)
+
+The application uses Socket.io for real-time updates:
+
+- **New Comments**: Comments appear instantly for all users viewing a post
+- **Like Updates**: Like counts update in real-time across all clients
+- **New Posts**: New posts from followed users appear in feed immediately
+
+Socket.io rooms:
+- `user-{userId}` - User-specific room for receiving updates
+- `feed` - General feed updates room
+- `post-{postId}` - Post-specific room for comment and like updates
+
+Frontend automatically connects to Socket.io server and joins appropriate rooms based on user activity.
+
 ## Troubleshooting
 
 ### Common Issues
 
 #### Backend won't start:
 - **Check environment variables**: Ensure all required variables are set in `backend/.env`
-  - `SUPABASE_URL`
-  - `SUPABASE_ANON_KEY`
-  - `SUPABASE_SERVICE_ROLE_KEY`
+  - Database credentials: `DB_HOST`, `DB_USER`, `DB_PASSWORD` (or Azure/AWS alternatives)
+  - AWS S3: `AWS_REGION`, `AWS_S3_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
   - `PORT` (optional, defaults to 3000)
-- **Verify Supabase credentials**: Check that your Supabase project URL and keys are correct
+- **Verify database connection**: Check that your PostgreSQL database is running and accessible
+- **Verify AWS credentials**: Ensure AWS S3 credentials are correct and have proper permissions
 - **Check Node.js version**: Verify Node.js version is 18 or higher: `node --version`
 - **Port already in use**: If port 3000 is taken, change `PORT` in `backend/.env` or stop the process using that port
 
@@ -578,18 +643,23 @@ All tables include proper foreign key constraints and cascade delete rules for d
 - **Restart frontend**: After changing `.env` file, restart the Vite dev server
 
 #### Image uploads fail:
-- **Verify Supabase Storage bucket**: Ensure bucket named `posts` exists in Supabase
+- **Verify AWS S3 bucket**: Ensure S3 bucket exists and name matches `AWS_S3_BUCKET_NAME` in `.env`
+- **Check AWS credentials**: Verify `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are correct
+- **Check AWS permissions**: Ensure IAM user/role has `s3:PutObject` and `s3:DeleteObject` permissions
 - **Check file size**: Verify file is under 5MB limit
 - **Check file type**: Only JPEG, JPG, PNG, GIF, WEBP are allowed
-- **Verify permissions**: Ensure Supabase service role key has proper storage permissions
-- **Check bucket settings**: Storage bucket should be configured correctly in Supabase dashboard
+- **Check bucket policy**: Ensure bucket policy allows public read access if needed
+- **Verify AWS region**: Ensure `AWS_REGION` matches your S3 bucket region
 
 #### Database connection errors:
 - **Test connection**: Use `GET /test-db` endpoint: `http://localhost:3000/test-db`
-- **Verify Supabase project**: Check that Supabase project is active (not paused)
-- **Check credentials**: Verify `SUPABASE_URL` and `SUPABASE_ANON_KEY` are correct
+- **Verify PostgreSQL is running**: Check that PostgreSQL server is running and accessible
+- **Check credentials**: Verify database connection credentials (`DB_HOST`, `DB_USER`, `DB_PASSWORD`)
+- **Check network**: Ensure database host is reachable (firewall, security groups, etc.)
+- **Check SSL settings**: If using cloud PostgreSQL, verify `DB_SSL` or `AZURE_POSTGRESQL_SSL` is set correctly
 - **Check tables**: Ensure database tables are created with correct schema
-- **Check RLS policies**: Verify Row Level Security policies allow necessary operations
+- **AWS Secrets Manager**: If using `DB_SECRET_ARN`, verify AWS credentials and secret exists
+- **Azure PostgreSQL**: If using Azure, verify all `AZURE_POSTGRESQL_*` variables are set correctly
 
 #### Tests fail:
 - **Install dependencies**: Run `npm install` to ensure all dependencies are installed
@@ -617,8 +687,10 @@ All tables include proper foreign key constraints and cascade delete rules for d
 - **Password Storage**: Passwords are currently stored as plain text (NOT SECURE). In production, use bcrypt or similar hashing libraries.
 - **CORS**: Configured to allow localhost origins. Update CORS settings in `backend/src/app.ts` for production deployment.
 - **Environment Variables**: Never commit `.env` files. They are already in `.gitignore`.
-- **API Keys**: Keep Supabase service role key secure and never expose it to the frontend.
+- **AWS Credentials**: Keep AWS access keys secure. Use IAM roles when deploying to AWS (EC2/Lambda).
+- **Database Credentials**: Use AWS Secrets Manager or Azure Key Vault for production database credentials.
 - **Authentication**: Currently uses simple header-based authentication. Consider implementing JWT tokens for production.
+- **Socket.io**: Real-time features require WebSocket support. Ensure your deployment environment supports WebSockets.
 
 ## Contributing
 

@@ -1,4 +1,16 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// Use production URL if in production, otherwise use development URL or fallback
+const isProduction = import.meta.env.PROD;
+const API_URL = isProduction
+  ? (import.meta.env.VITE_BACKEND_URL_PRODUCTION || import.meta.env.VITE_API_URL || 'http://localhost:3000')
+  : (import.meta.env.VITE_API_URL || 'http://localhost:3000');
+
+// Debug logging (only in production to help diagnose issues)
+if (isProduction) {
+  console.log('[API] Production mode detected');
+  console.log('[API] VITE_BACKEND_URL_PRODUCTION:', import.meta.env.VITE_BACKEND_URL_PRODUCTION ? 'SET' : 'NOT SET');
+  console.log('[API] VITE_API_URL:', import.meta.env.VITE_API_URL ? 'SET' : 'NOT SET');
+  console.log('[API] Using API_URL:', API_URL);
+}
 
 type HeaderProvider = () => Promise<Record<string,string>> | Record<string,string>;
 type UserProvider = () => any;
@@ -286,6 +298,12 @@ class ApiService {
 
   async getFeed(): Promise<any> {
     const headers = await this.getAuthHeaders();
+    
+    // Debug logging in production
+    if (import.meta.env.PROD) {
+      console.log('[API] getFeed - Headers being sent:', headers);
+      console.log('[API] getFeed - x-user-id:', headers['x-user-id'] || 'NOT SET');
+    }
 
     const response = await fetch(`${API_URL}/api/feed`, {
       method: 'GET',
