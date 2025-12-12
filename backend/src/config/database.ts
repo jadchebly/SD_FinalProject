@@ -72,7 +72,19 @@ async function getCredentialsFromSecretsManager(): Promise<{
 
 // Function to get database configuration
 async function getDbConfig() {
-  // If DB_SECRET_ARN is set, use AWS Secrets Manager
+  // Check for Azure PostgreSQL environment variables first (for staging)
+  if (process.env.AZURE_POSTGRESQL_HOST && process.env.AZURE_POSTGRESQL_USER && process.env.AZURE_POSTGRESQL_PASSWORD) {
+    console.log('Using Azure PostgreSQL for database credentials');
+    return {
+      host: process.env.AZURE_POSTGRESQL_HOST,
+      port: parseInt(process.env.AZURE_POSTGRESQL_PORT || '5432'),
+      database: process.env.AZURE_POSTGRESQL_DATABASE || 'postgres',
+      user: process.env.AZURE_POSTGRESQL_USER,
+      password: process.env.AZURE_POSTGRESQL_PASSWORD,
+    };
+  }
+
+  // If DB_SECRET_ARN is set, use AWS Secrets Manager (for production)
   if (process.env.DB_SECRET_ARN) {
     console.log('Using AWS Secrets Manager for database credentials');
     return await getCredentialsFromSecretsManager();
@@ -80,7 +92,7 @@ async function getDbConfig() {
 
   // Otherwise, use environment variables directly
   if (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD) {
-    throw new Error('Missing database credentials. Set either DB_SECRET_ARN or DB_HOST, DB_USER, DB_PASSWORD');
+    throw new Error('Missing database credentials. Set either AZURE_POSTGRESQL_* variables, DB_SECRET_ARN, or DB_HOST, DB_USER, DB_PASSWORD');
   }
 
   return {
@@ -103,13 +115,19 @@ async function initializePool() {
 
   const config = await getDbConfig();
   
+  // Determine SSL configuration - prioritize Azure PostgreSQL SSL setting
+  const useSSL = process.env.AZURE_POSTGRESQL_SSL === 'true' || 
+                 process.env.AZURE_POSTGRESQL_SSL === '1' ||
+                 (process.env.AZURE_POSTGRESQL_HOST && process.env.DB_SSL !== 'false') ||
+                 process.env.DB_SSL === 'true';
+  
   pool = new Pool({
     host: config.host,
     port: config.port,
     database: config.database,
     user: config.user,
     password: config.password,
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+    ssl: useSSL ? { rejectUnauthorized: false } : false,
     max: 20, // Maximum number of clients in the pool
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000, // Increased to 10 seconds
@@ -141,10 +159,16 @@ function getPool(): Pool {
     poolPromise = initializePool();
   }
   
-  // For synchronous access, we'll create a temporary pool with env vars
-  // The async initialization will happen on first query
+
   if (!pool) {
-    const config = {
+    // Check for Azure PostgreSQL variables first, then fall back to standard DB_* variables
+    const config = process.env.AZURE_POSTGRESQL_HOST ? {
+      host: process.env.AZURE_POSTGRESQL_HOST,
+      port: parseInt(process.env.AZURE_POSTGRESQL_PORT || '5432'),
+      database: process.env.AZURE_POSTGRESQL_DATABASE || 'postgres',
+      user: process.env.AZURE_POSTGRESQL_USER || 'postgres',
+      password: process.env.AZURE_POSTGRESQL_PASSWORD || '',
+    } : {
       host: process.env.DB_HOST || '',
       port: parseInt(process.env.DB_PORT || '5432'),
       database: process.env.DB_NAME || 'postgres',
@@ -152,9 +176,14 @@ function getPool(): Pool {
       password: process.env.DB_PASSWORD || '',
     };
 
+    const useSSL = process.env.AZURE_POSTGRESQL_SSL === 'true' || 
+                   process.env.AZURE_POSTGRESQL_SSL === '1' ||
+                   (process.env.AZURE_POSTGRESQL_HOST && process.env.DB_SSL !== 'false') ||
+                   process.env.DB_SSL === 'true';
+
     pool = new Pool({
       ...config,
-      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+      ssl: useSSL ? { rejectUnauthorized: false } : false,
       max: 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,

@@ -1,0 +1,73 @@
+name: Azure Static Web Apps CI/CD (staging)
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - dev
+
+jobs:
+  build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy Job
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (staging)
+        env:
+          # 👇 This is what Vite will see in import.meta.env
+          VITE_BACKEND_URL_PRODUCTION: ${{ secrets.VITE_BACKEND_URL_STAGING }}
+          NODE_ENV: production #needed for vite to build the app
+        run: |
+          if [ -z "$VITE_BACKEND_URL_PRODUCTION" ]; then
+            echo "❌ ERROR: VITE_BACKEND_URL_PRODUCTION is not set!"
+            exit 1
+          fi
+          echo "Creating .env.production for staging build..."
+          echo "VITE_BACKEND_URL_PRODUCTION=$VITE_BACKEND_URL_PRODUCTION" > .env.production
+          echo "NODE_ENV=production" >> .env.production
+          echo "Contents of .env.production:"
+          cat .env.production
+          npm run build
+
+      - name: Build And Deploy
+        id: builddeploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PROUD_ROCK_02C383903 }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for Github integrations (i.e. PR comments)
+          action: "upload"
+          ###### Repository/Build Configurations ######
+          app_location: "/"     # App source code path
+          api_location: ""      # Api source code path - optional
+          output_location: "dist"  # Built app content directory
+          ###### End of Repository/Build Configurations ######
+
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        id: closepullrequest
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PROUD_ROCK_02C383903 }}
+          action: "close"

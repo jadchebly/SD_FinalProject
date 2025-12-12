@@ -12,6 +12,47 @@ import * as appInsights from 'applicationinsights';
 dotenv.config();
 
 
+// CORS origin validation function (shared between Express and Socket.io)
+const validateOrigin = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+  if (!origin) return callback(null, true);
+  
+  // Allow localhost for development
+  if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
+    return callback(null, true);
+  }
+  
+  // Determine environment and frontend URL
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isStaging = process.env.NODE_ENV === 'staging' || process.env.AZURE_POSTGRESQL_HOST; // Staging if using Azure DB
+  const frontendUrl = isProduction 
+    ? process.env.FRONTEND_URL_PRODUCTION 
+    : isStaging
+    ? process.env.FRONTEND_URL_STAGING
+    : process.env.FRONTEND_URL;
+  
+  const allowedOrigins = [
+    frontendUrl,
+    process.env.FRONTEND_URL_STAGING,
+    process.env.FRONTEND_URL_PRODUCTION,
+    'http://localhost:5173',
+    'http://localhost:5174',
+  ].filter(Boolean);
+  
+  // Check exact match first
+  if (allowedOrigins.includes(origin)) {
+    return callback(null, true);
+  }
+  
+  // Allow Azure Static Web Apps domains (for both production and staging)
+  // Azure Static Web Apps can have different subdomains (e.g., .1., .2., .3., etc.)
+  if (origin.includes('.azurestaticapps.net')) {
+    return callback(null, true);
+  }
+  
+  callback(new Error('Not allowed by CORS'));
+};
+
+
 // Initialize Application Insights if connection string is provided
 //Source: https://signoz.io/guides/azure-app-insights/
 let telemetryClient: appInsights.TelemetryClient | undefined;
@@ -28,42 +69,12 @@ if (process.env.APPLICATIONINSIGHTS_CONNECTION_STRING) {
   console.log('Application Insights not configured');
 }
 
+
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      
-      // Allow localhost for development
-      if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
-        return callback(null, true);
-      }
-      
-      // Use production URL if in production, otherwise use development URL
-      const isProduction = process.env.NODE_ENV === 'production';
-      const frontendUrl = isProduction 
-        ? process.env.FRONTEND_URL_PRODUCTION 
-        : process.env.FRONTEND_URL;
-      
-      const allowedOrigins = [
-        frontendUrl,
-        'http://localhost:5173',
-        'http://localhost:5174',
-      ].filter(Boolean);
-      
-      // Check exact match first
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      
-      // In production, also allow Azure Static Web Apps domains
-      if (isProduction && origin.includes('.azurestaticapps.net')) {
-        return callback(null, true);
-      }
-      
-      callback(new Error('Not allowed by CORS'));
-    },
+    origin: validateOrigin,
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -78,48 +89,21 @@ const upload = multer({
   },
 });
 
-// Middleware
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    
-    // Allow localhost for development
-    if (origin.startsWith('http://localhost:') || origin.startsWith('https://localhost:')) {
-      return callback(null, true);
-    }
-    
-    // Use production URL if in production, otherwise use development URL
-    const isProduction = process.env.NODE_ENV === 'production';
-    const frontendUrl = isProduction 
-      ? process.env.FRONTEND_URL_PRODUCTION 
-      : process.env.FRONTEND_URL;
-    
-    const allowedOrigins = [
-      frontendUrl,
-      'http://localhost:5173',
-      'http://localhost:5174',
-    ].filter(Boolean);
-    
-    // Check exact match first
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    // In production, also allow Azure Static Web Apps domains
-    // Azure Static Web Apps can have different subdomains (e.g., .1., .2., .3., etc.)
-    if (isProduction && origin.includes('.azurestaticapps.net')) {
-      return callback(null, true);
-    }
-    
-    callback(new Error('Not allowed by CORS'));
-  },
+// CORS configuration function
+const corsOptions = {
+  origin: validateOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id'],
-}));
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
+};
 
-// Handle preflight OPTIONS requests explicitly
-app.options('*', cors());
+// Middleware
+app.use(cors(corsOptions));
+
+// Handle preflight OPTIONS requests explicitly with the same CORS config
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
