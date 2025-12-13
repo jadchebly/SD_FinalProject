@@ -46,7 +46,7 @@ A full-stack social media application built with React and Express, featuring us
 - **Application Insights** - Azure telemetry and monitoring (optional)
 
 ### Database & Storage
-- **PostgreSQL** - Relational database (supports AWS RDS, Azure PostgreSQL, or local PostgreSQL)
+- **PostgreSQL** - Relational database (supports AWS RDS or local PostgreSQL)
 - **AWS S3** - Image file storage
 - **Socket.io** - Real-time updates for likes, comments, and new posts
 
@@ -59,11 +59,9 @@ Before you begin, ensure you have the following installed:
 - **Git** - [Download](https://git-scm.com/)
 - **PostgreSQL Database** - Either:
   - Local PostgreSQL installation, or
-  - AWS RDS PostgreSQL instance, or
-  - Azure PostgreSQL instance
-- **AWS Account** (for S3 storage) - [Sign up](https://aws.amazon.com/) (free tier available)
+  - AWS RDS PostgreSQL instance
+- **AWS Account** (for S3 storage) - [Sign up](https://aws.amazon.com/)
   - AWS S3 bucket for image storage
-  - Optional: AWS Secrets Manager for database credentials
 
 ## Installation
 
@@ -85,17 +83,15 @@ Before you begin, ensure you have the following installed:
    cd ..
    ```
 
-4. **Set up Database**
+4. **Set up Your Own Database (Optional)**
    - Set up a PostgreSQL database (local, AWS RDS, or Azure PostgreSQL)
    - Create the required database tables (users, posts, likes, comments, follows)
-   - Ensure foreign key relationships and cascade delete rules are set up
-   - See Database Schema section for table structure
+   - See env file for keys
 
-5. **Set up AWS S3 (for image storage)**
+5. **Set up AWS S3 (for image storage) (Optional)**
    - Create an AWS S3 bucket for image uploads
    - Configure bucket policy for public read access (if needed)
-   - Note down your AWS region, bucket name, and credentials
-   - Optional: Set up IAM role for EC2/Lambda if deploying to AWS
+   - See env file for keys
 
 ## Environment Variables
 
@@ -104,25 +100,7 @@ Before you begin, ensure you have the following installed:
 Create a `.env` file in the `backend/` directory:
 
 ```env
-# Database Configuration (choose one option)
-
-# Option 1: Direct PostgreSQL connection
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=your_database_name
-DB_USER=your_database_user
-DB_PASSWORD=your_database_password
-DB_SSL=false
-
-# Option 2: Azure PostgreSQL (for staging)
-# AZURE_POSTGRESQL_HOST=your-azure-postgresql-host.postgres.database.azure.com
-# AZURE_POSTGRESQL_PORT=5432
-# AZURE_POSTGRESQL_DATABASE=your_database_name
-# AZURE_POSTGRESQL_USER=your_azure_user
-# AZURE_POSTGRESQL_PASSWORD=your_azure_password
-# AZURE_POSTGRESQL_SSL=true
-
-# Option 3: AWS RDS with Secrets Manager (for production)
+AWS RDS with Secrets Manager (for production)
 # DB_SECRET_ARN=arn:aws:secretsmanager:region:account:secret:name
 # AWS_REGION=eu-north-1
 # AWS_ACCESS_KEY_ID=your_aws_access_key (optional if using IAM role)
@@ -656,10 +634,9 @@ Frontend automatically connects to Socket.io server and joins appropriate rooms 
 - **Verify PostgreSQL is running**: Check that PostgreSQL server is running and accessible
 - **Check credentials**: Verify database connection credentials (`DB_HOST`, `DB_USER`, `DB_PASSWORD`)
 - **Check network**: Ensure database host is reachable (firewall, security groups, etc.)
-- **Check SSL settings**: If using cloud PostgreSQL, verify `DB_SSL` or `AZURE_POSTGRESQL_SSL` is set correctly
+- **Check SSL settings**: If using cloud PostgreSQL, verify `DB_SSL` is set correctly
 - **Check tables**: Ensure database tables are created with correct schema
 - **AWS Secrets Manager**: If using `DB_SECRET_ARN`, verify AWS credentials and secret exists
-- **Azure PostgreSQL**: If using Azure, verify all `AZURE_POSTGRESQL_*` variables are set correctly
 
 #### Tests fail:
 - **Install dependencies**: Run `npm install` to ensure all dependencies are installed
@@ -682,20 +659,18 @@ Frontend automatically connects to Socket.io server and joins appropriate rooms 
 
 ## Security Notes
 
-⚠️ **Important**: This project is configured for development purposes. The following security considerations apply:
-
-- **Password Storage**: Passwords are currently stored as plain text (NOT SECURE). In production, use bcrypt or similar hashing libraries.
+- **Password Storage**: Passwords are currently stored as plain text.
 - **CORS**: Configured to allow localhost origins. Update CORS settings in `backend/src/app.ts` for production deployment.
 - **Environment Variables**: Never commit `.env` files. They are already in `.gitignore`.
 - **AWS Credentials**: Keep AWS access keys secure. Use IAM roles when deploying to AWS (EC2/Lambda).
 - **Database Credentials**: Use AWS Secrets Manager or Azure Key Vault for production database credentials.
-- **Authentication**: Currently uses simple header-based authentication. Consider implementing JWT tokens for production.
+- **Authentication**: Currently uses simple header-based authentication.
 - **Socket.io**: Real-time features require WebSocket support. Ensure your deployment environment supports WebSockets.
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+2. Create a feature branch off of dev! (`git checkout -b feature/amazing-feature`)
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
