@@ -229,7 +229,19 @@ app.post('/api/signup', async (req, res) => {
 
     console.log('User created successfully:', newUser.id);
 
-    res.json({
+    if (!newUser?.id) {
+      console.error('Create user returned invalid newUser:', newUser);
+      return res.status(500).json({ success: false, error: 'User created but id not returned' });
+    }
+
+    // Set a simple HttpOnly session cookie so frontend can rehydrate without localStorage
+    try {
+      res.cookie('sid', newUser.id, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
+    } catch (e) {
+      // ignore cookie errors
+    }
+
+    return res.json({
       success: true,
       user: {
         id: newUser.id,
@@ -238,12 +250,6 @@ app.post('/api/signup', async (req, res) => {
         avatar: newUser.avatar_url || null,
       },
     });
-    // Set a simple HttpOnly session cookie so frontend can rehydrate without localStorage
-    try {
-      res.cookie('sid', newUser.id, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
-    } catch (e) {
-      // ignore cookie errors
-    }
   } catch (error: any) {
     console.error('Signup error:', error);
     const errorMessage = error?.message || error?.error || 'Failed to create account';

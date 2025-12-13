@@ -4,14 +4,33 @@ import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-sec
 
 dotenv.config();
 
+// Helper function to determine if we're in staging
+function isStaging(): boolean {
+  return process.env.NODE_ENV === 'staging' || 
+         !!process.env.STAGING_DB_HOST || 
+         !!process.env.AZURE_POSTGRESQL_HOST;
+}
+
+// Helper function to get environment variable (STAGING_* prefix in staging, regular otherwise)
+function getEnvVar(regularName: string, stagingName?: string): string | undefined {
+  if (isStaging() && stagingName) {
+    return process.env[stagingName] || process.env[regularName];
+  }
+  return process.env[regularName];
+}
+
 // Initialize AWS Secrets Manager client (optional - only used if DB_SECRET_ARN is set)
 let secretsManagerClient: SecretsManagerClient | null = null;
-if (process.env.AWS_REGION) {
+const awsRegion = getEnvVar('AWS_REGION', 'STAGING_AWS_REGION');
+const awsAccessKeyId = getEnvVar('AWS_ACCESS_KEY_ID', 'STAGING_AWS_ACCESS_KEY_ID');
+const awsSecretAccessKey = getEnvVar('AWS_SECRET_ACCESS_KEY', 'STAGING_AWS_SECRET_ACCESS_KEY');
+
+if (awsRegion) {
   secretsManagerClient = new SecretsManagerClient({
-    region: process.env.AWS_REGION,
-    credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    region: awsRegion,
+    credentials: awsAccessKeyId && awsSecretAccessKey ? {
+      accessKeyId: awsAccessKeyId,
+      secretAccessKey: awsSecretAccessKey,
     } : undefined, // Will use IAM role if running on EC2/Lambda
   });
 }
@@ -24,7 +43,8 @@ async function getCredentialsFromSecretsManager(): Promise<{
   user: string;
   password: string;
 }> {
-  if (!process.env.DB_SECRET_ARN) {
+  const dbSecretArn = getEnvVar('DB_SECRET_ARN', 'STAGING_DB_SECRET_ARN');
+  if (!dbSecretArn) {
     throw new Error('DB_SECRET_ARN environment variable is required when using Secrets Manager');
   }
 
@@ -34,7 +54,7 @@ async function getCredentialsFromSecretsManager(): Promise<{
 
   try {
     const command = new GetSecretValueCommand({
-      SecretId: process.env.DB_SECRET_ARN,
+      SecretId: dbSecretArn,
     });
 
     const response = await secretsManagerClient.send(command);
@@ -47,7 +67,8 @@ async function getCredentialsFromSecretsManager(): Promise<{
     
     // RDS secrets typically contain: username, password, engine, host, port, dbname
     // But sometimes host/endpoint is not in the secret, so we use DB_HOST from env
-    const host = secret.host || secret.endpoint || process.env.DB_HOST;
+    const dbHost = getEnvVar('DB_HOST', 'STAGING_DB_HOST');
+    const host = secret.host || secret.endpoint || dbHost;
     if (!host) {
       throw new Error('Database host not found in secret and DB_HOST environment variable is not set');
     }
@@ -55,13 +76,15 @@ async function getCredentialsFromSecretsManager(): Promise<{
     // RDS secrets sometimes have the instance name as dbname, but we want the actual database name
     // Default to 'postgres' which is the standard PostgreSQL default database
     // Priority: DB_NAME env var > 'postgres' (default) > secret value (which might be instance name)
-    const dbName = process.env.DB_NAME || 'postgres';
+    const dbName = getEnvVar('DB_NAME', 'STAGING_DB_NAME') || 'postgres';
+    const dbPort = getEnvVar('DB_PORT', 'STAGING_DB_PORT') || '5432';
+    const dbUser = getEnvVar('DB_USER', 'STAGING_DB_USER') || 'postgres';
     
     return {
       host: host,
-      port: parseInt(secret.port || process.env.DB_PORT || '5432'),
+      port: parseInt(secret.port || dbPort || '5432'),
       database: dbName,
-      user: secret.username || secret.user || process.env.DB_USER || 'postgres',
+      user: secret.username || secret.user || dbUser,
       password: secret.password || '',
     };
   } catch (error: any) {
@@ -84,23 +107,28 @@ async function getDbConfig() {
     };
   }
 
-  // If DB_SECRET_ARN is set, use AWS Secrets Manager (for production)
-  if (process.env.DB_SECRET_ARN) {
+  // If DB_SECRET_ARN is set, use AWS Secrets Manager (for production/staging)
+  const dbSecretArn = getEnvVar('DB_SECRET_ARN', 'STAGING_DB_SECRET_ARN');
+  if (dbSecretArn) {
     console.log('Using AWS Secrets Manager for database credentials');
     return await getCredentialsFromSecretsManager();
   }
 
-  // Otherwise, use environment variables directly
-  if (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD) {
+  // Otherwise, use environment variables directly (with staging support)
+  const dbHost = getEnvVar('DB_HOST', 'STAGING_DB_HOST');
+  const dbUser = getEnvVar('DB_USER', 'STAGING_DB_USER');
+  const dbPassword = process.env.DB_PASSWORD || (isStaging() ? process.env.STAGING_DB_PASSWORD : undefined);
+  
+  if (!dbHost || !dbUser || !dbPassword) {
     throw new Error('Missing database credentials. Set either AZURE_POSTGRESQL_* variables, DB_SECRET_ARN, or DB_HOST, DB_USER, DB_PASSWORD');
   }
 
   return {
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT || '5432'),
-    database: process.env.DB_NAME || 'postgres',
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
+    host: dbHost,
+    port: parseInt(getEnvVar('DB_PORT', 'STAGING_DB_PORT') || '5432'),
+    database: getEnvVar('DB_NAME', 'STAGING_DB_NAME') || 'postgres',
+    user: dbUser,
+    password: dbPassword,
   };
 }
 
@@ -150,57 +178,7 @@ async function initializePool() {
 // Note: This will use environment variables if DB_SECRET_ARN is not set
 let poolPromise: Promise<Pool> | null = null;
 
-function getPool(): Pool {
-  if (pool) {
-    return pool;
-  }
-  
-  if (!poolPromise) {
-    poolPromise = initializePool();
-  }
-  
 
-  if (!pool) {
-    // Check for Azure PostgreSQL variables first, then fall back to standard DB_* variables
-    const config = process.env.AZURE_POSTGRESQL_HOST ? {
-      host: process.env.AZURE_POSTGRESQL_HOST,
-      port: parseInt(process.env.AZURE_POSTGRESQL_PORT || '5432'),
-      database: process.env.AZURE_POSTGRESQL_DATABASE || 'postgres',
-      user: process.env.AZURE_POSTGRESQL_USER || 'postgres',
-      password: process.env.AZURE_POSTGRESQL_PASSWORD || '',
-    } : {
-      host: process.env.DB_HOST || '',
-      port: parseInt(process.env.DB_PORT || '5432'),
-      database: process.env.DB_NAME || 'postgres',
-      user: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASSWORD || '',
-    };
-
-    const useSSL = process.env.AZURE_POSTGRESQL_SSL === 'true' || 
-                   process.env.AZURE_POSTGRESQL_SSL === '1' ||
-                   (process.env.AZURE_POSTGRESQL_HOST && process.env.DB_SSL !== 'false') ||
-                   process.env.DB_SSL === 'true';
-
-    pool = new Pool({
-      ...config,
-      ssl: useSSL ? { rejectUnauthorized: false } : false,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
-    });
-
-    pool.on('connect', () => {
-      console.log('Connected to PostgreSQL database');
-    });
-
-    pool.on('error', (err) => {
-      console.error('Unexpected error on idle client', err);
-      process.exit(-1);
-    });
-  }
-  
-  return pool;
-}
 
 // Database query helper class with PostgreSQL query builder API
 // Implements thenable interface so it can be awaited directly
@@ -565,7 +543,9 @@ export const db = new DatabaseClient();
 export const dbAdmin = new DatabaseClient(); // Same as db for RDS
 
 // Export pool for direct queries if needed
-export const dbPool = getPool();
+export async function getDbPool(): Promise<Pool> {
+  return initializePool();
+}
 
 // Test connection function
 export async function testConnection(): Promise<boolean> {

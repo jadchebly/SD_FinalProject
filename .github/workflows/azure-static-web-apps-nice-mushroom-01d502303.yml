@@ -4,10 +4,7 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    types: [opened, synchronize, reopened, closed]
-    branches:
-      - main
+      - dev
   workflow_run:
     workflows: ["Build and deploy Node.js app to Azure Web App - IEstagram"]
     types:
@@ -120,3 +117,4 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_NICE_MUSHROOM_01D502303 }}
           action: "close"
+
