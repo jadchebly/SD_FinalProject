@@ -304,6 +304,20 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
       // Ensure pool is initialized (will use Secrets Manager if DB_SECRET_ARN is set)
       const dbPool = await initializePool();
       
+      // Helper function to get RETURNING clause
+      const getReturningClause = (): string => {
+        if (this.selectFields.length > 0 && this.selectFields[0] !== '*') {
+          // Filter out any fields that don't exist in the table (like nested selects)
+          const validFields = this.selectFields.filter(field => 
+            !field.includes('(') && !field.includes(':')
+          );
+          if (validFields.length > 0) {
+            return validFields.join(', ');
+          }
+        }
+        return '*';
+      };
+      
       let query = '';
       let params: any[] = [];
       let paramIndex = 1;
@@ -315,7 +329,7 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
         const placeholders = values.join(', ');
         params = keys.map(key => this.insertData[key]);
         
-        query = `INSERT INTO ${this.table} (${keys.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+        query = `INSERT INTO ${this.table} (${keys.join(', ')}) VALUES (${placeholders}) RETURNING ${getReturningClause()}`;
       } else if (this.updateData) {
         // UPDATE query
         const setClauses = Object.keys(this.updateData).map(key => {
@@ -357,7 +371,7 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
           query += ` WHERE ${whereClauses.join(' AND ')}`;
         }
         
-        query += ' RETURNING *';
+        query += ` RETURNING ${getReturningClause()}`;
       } else if (this.deleteMode) {
         // DELETE query
         query = `DELETE FROM ${this.table}`;
@@ -392,7 +406,7 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
           query += ` WHERE ${whereClauses.join(' AND ')}`;
         }
         
-        query += ' RETURNING *';
+        query += ` RETURNING ${getReturningClause()}`;
       } else if (this.countMode) {
         // COUNT query
         query = `SELECT COUNT(*) as count FROM ${this.table}`;
@@ -518,8 +532,16 @@ class DatabaseQuery implements PromiseLike<{ data: any; error: any; count?: numb
       }
       
       // Handle single() - return first row or null
-      if (this.limitCount === 1 && !this.insertData && !this.updateData && !this.deleteMode && !this.countMode) {
-        return { data: data[0] || null, error: null };
+      // For INSERT/UPDATE/DELETE with RETURNING, they typically return one row, so return first element
+      // For SELECT queries, return first element only if .single() was called (limitCount === 1)
+      if (this.insertData || this.updateData || this.deleteMode) {
+        // INSERT/UPDATE/DELETE with RETURNING should return a single row
+        return { data: Array.isArray(data) ? (data[0] || null) : data, error: null };
+      }
+      
+      // For SELECT queries, only return single if .single() was called
+      if (this.limitCount === 1) {
+        return { data: Array.isArray(data) ? (data[0] || null) : data, error: null };
       }
       
       return { data, error: null };
