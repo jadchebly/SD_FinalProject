@@ -10,6 +10,8 @@ name: CD Pipeline
 on:
   push:
     branches: [main, staging, dev]
+  pull_request:
+    branches: [main, staging, dev]
   workflow_dispatch:
 
 # Prevent concurrent deployments to the same environment
