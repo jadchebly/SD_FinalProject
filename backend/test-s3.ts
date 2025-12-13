@@ -15,16 +15,35 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Helper function to determine if we're in staging
+function isStaging(): boolean {
+  return process.env.NODE_ENV === 'staging' || !!process.env.STAGING_AWS_REGION;
+}
+
+// Helper function to get environment variable (STAGING_* prefix in staging, regular otherwise)
+function getEnvVar(regularName: string, stagingName: string): string | undefined {
+  if (isStaging()) {
+    return process.env[stagingName] || process.env[regularName];
+  }
+  return process.env[regularName];
+}
+
+// Get S3 configuration (use STAGING_* variables if in staging)
+const awsRegion = getEnvVar('AWS_REGION', 'STAGING_AWS_REGION') || 'eu-north-1';
+const awsAccessKeyId = getEnvVar('AWS_ACCESS_KEY_ID', 'STAGING_AWS_ACCESS_KEY_ID') || '';
+const awsSecretAccessKey = getEnvVar('AWS_SECRET_ACCESS_KEY', 'STAGING_AWS_SECRET_ACCESS_KEY') || '';
+const bucketName = getEnvVar('AWS_S3_BUCKET_NAME', 'STAGING_AWS_S3_BUCKET_NAME') || 'amzn-s3-ie-assignment';
+
 // Initialize S3 client
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || 'eu-north-1',
+  region: awsRegion,
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+    accessKeyId: awsAccessKeyId,
+    secretAccessKey: awsSecretAccessKey,
   },
 });
 
-const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME || 'amzn-s3-ie-assignment';
+const BUCKET_NAME = bucketName;
 
 // Test colors
 const green = '\x1b[32m';
@@ -58,7 +77,15 @@ async function testS3Connection() {
 
   // Check environment variables
   info('Checking environment variables...');
-  const requiredVars = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET_NAME', 'AWS_REGION'];
+  const isStagingEnv = isStaging();
+  if (isStagingEnv) {
+    info('Using STAGING_* environment variables');
+  }
+  
+  const requiredVars = isStagingEnv 
+    ? ['STAGING_AWS_ACCESS_KEY_ID', 'STAGING_AWS_SECRET_ACCESS_KEY', 'STAGING_AWS_S3_BUCKET_NAME', 'STAGING_AWS_REGION']
+    : ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_S3_BUCKET_NAME', 'AWS_REGION'];
+  
   const missingVars = requiredVars.filter(varName => !process.env[varName]);
 
   if (missingVars.length > 0) {
@@ -69,7 +96,7 @@ async function testS3Connection() {
   success('All environment variables are set');
 
   info(`Bucket: ${BUCKET_NAME}`);
-  info(`Region: ${process.env.AWS_REGION}`);
+  info(`Region: ${awsRegion}`);
 
   // Test bucket access
   try {
@@ -110,7 +137,7 @@ async function testUpload() {
     success('File uploaded successfully');
 
     // Construct S3 URL
-    const url = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/test/${testFileName}`;
+    const url = `https://${BUCKET_NAME}.s3.${awsRegion}.amazonaws.com/test/${testFileName}`;
     info(`File URL: ${url}`);
 
     // Test public access
@@ -159,7 +186,7 @@ async function testDelete(fileName: string) {
 
     // Verify deletion
     info('Verifying deletion...');
-    const url = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+    const url = `https://${BUCKET_NAME}.s3.${awsRegion}.amazonaws.com/${fileName}`;
     try {
       const response = await fetch(url);
       if (response.status === 404) {
