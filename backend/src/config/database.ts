@@ -178,57 +178,7 @@ async function initializePool() {
 // Note: This will use environment variables if DB_SECRET_ARN is not set
 let poolPromise: Promise<Pool> | null = null;
 
-function getPool(): Pool {
-  if (pool) {
-    return pool;
-  }
-  
-  if (!poolPromise) {
-    poolPromise = initializePool();
-  }
-  
 
-  if (!pool) {
-    // Check for Azure PostgreSQL variables first, then fall back to standard DB_* variables
-    const config = process.env.AZURE_POSTGRESQL_HOST ? {
-      host: process.env.AZURE_POSTGRESQL_HOST,
-      port: parseInt(process.env.AZURE_POSTGRESQL_PORT || '5432'),
-      database: process.env.AZURE_POSTGRESQL_DATABASE || 'postgres',
-      user: process.env.AZURE_POSTGRESQL_USER || 'postgres',
-      password: process.env.AZURE_POSTGRESQL_PASSWORD || '',
-    } : {
-      host: getEnvVar('DB_HOST', 'STAGING_DB_HOST') || '',
-      port: parseInt(getEnvVar('DB_PORT', 'STAGING_DB_PORT') || '5432'),
-      database: getEnvVar('DB_NAME', 'STAGING_DB_NAME') || 'postgres',
-      user: getEnvVar('DB_USER', 'STAGING_DB_USER') || 'postgres',
-      password: process.env.DB_PASSWORD || (isStaging() ? process.env.STAGING_DB_PASSWORD : undefined) || '',
-    };
-
-    const useSSL = process.env.AZURE_POSTGRESQL_SSL === 'true' || 
-                   process.env.AZURE_POSTGRESQL_SSL === '1' ||
-                   (process.env.AZURE_POSTGRESQL_HOST && process.env.DB_SSL !== 'false') ||
-                   process.env.DB_SSL === 'true';
-
-    pool = new Pool({
-      ...config,
-      ssl: useSSL ? { rejectUnauthorized: false } : false,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
-    });
-
-    pool.on('connect', () => {
-      console.log('Connected to PostgreSQL database');
-    });
-
-    pool.on('error', (err) => {
-      console.error('Unexpected error on idle client', err);
-      process.exit(-1);
-    });
-  }
-  
-  return pool;
-}
 
 // Database query helper class with PostgreSQL query builder API
 // Implements thenable interface so it can be awaited directly
@@ -593,7 +543,9 @@ export const db = new DatabaseClient();
 export const dbAdmin = new DatabaseClient(); // Same as db for RDS
 
 // Export pool for direct queries if needed
-export const dbPool = getPool();
+export async function getDbPool(): Promise<Pool> {
+  return initializePool();
+}
 
 // Test connection function
 export async function testConnection(): Promise<boolean> {
