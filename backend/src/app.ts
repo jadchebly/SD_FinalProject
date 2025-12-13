@@ -224,15 +224,48 @@ app.post('/api/signup', async (req, res) => {
 
     if (createError) {
       console.error('Error creating user:', createError);
+      
+
+      const errorCode = createError.code;
+      const errorMessage = (createError.message || '').toLowerCase();
+      
+      if (errorCode === '23505' || errorCode === 23505 || errorMessage.includes('unique constraint') || errorMessage.includes('duplicate key')) {
+        if (errorMessage.includes('users_username_key') || errorMessage.includes('username')) {
+          return res.status(400).json({ 
+            success: false, 
+            error: 'Username already taken' 
+          });
+        }
+        
+        if (errorMessage.includes('users_email_key') || errorMessage.includes('email')) {
+          return res.status(400).json({ 
+            success: false, 
+            error: 'Email already registered' 
+          });
+        }
+        
+        return res.status(400).json({ 
+          success: false, 
+          error: 'A user with this username or email already exists' 
+        });
+      }
+      
+      // For other errors, throw to be caught by the catch block
       throw createError;
     }
 
-    console.log('User created successfully:', newUser.id);
+    // Check if newUser is null or undefined (shouldn't happen, but handle it)
+    if (!newUser) {
+      console.error('Create user returned null/undefined newUser');
+      return res.status(500).json({ success: false, error: 'User created but data not returned' });
+    }
 
-    if (!newUser?.id) {
-      console.error('Create user returned invalid newUser:', newUser);
+    if (!newUser.id) {
+      console.error('Create user returned invalid newUser (missing id):', newUser);
       return res.status(500).json({ success: false, error: 'User created but id not returned' });
     }
+
+    console.log('User created successfully:', newUser.id);
 
     // Set a simple HttpOnly session cookie so frontend can rehydrate without localStorage
     try {
@@ -252,12 +285,41 @@ app.post('/api/signup', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Signup error:', error);
-    const errorMessage = error?.message || error?.error || 'Failed to create account';
+    
+    // Handle duplicate key errors in catch block as fallback
+    const errorCode = error?.code;
+    const errorMessage = (error?.message || error?.error || 'Failed to create account').toLowerCase();
+    
+    if (errorCode === '23505' || errorCode === 23505 || errorMessage.includes('unique constraint') || errorMessage.includes('duplicate key')) {
+      // Check which constraint was violated
+      if (errorMessage.includes('users_username_key') || errorMessage.includes('username')) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Username already taken' 
+        });
+      }
+      
+      if (errorMessage.includes('users_email_key') || errorMessage.includes('email')) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Email already registered' 
+        });
+      }
+      
+      // Generic unique constraint violation
+      return res.status(400).json({ 
+        success: false, 
+        error: 'A user with this username or email already exists' 
+      });
+    }
+    
+    // For other errors, return 500
+    const errorMessageDisplay = error?.message || error?.error || 'Failed to create account';
     const errorDetails = error?.details || error?.hint || '';
     
     res.status(500).json({
       success: false,
-      error: errorMessage,
+      error: errorMessageDisplay,
       details: errorDetails,
     });
   }
