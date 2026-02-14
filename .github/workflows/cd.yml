@@ -198,7 +198,7 @@ jobs:
       - name: Set up Node.js version
         uses: actions/setup-node@v3
         with:
-          node-version: '20.x'
+          node-version: "20.x"
 
       - name: npm install, build, and test (backend)
         working-directory: ./backend
@@ -217,28 +217,41 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: node-app
-      
+          path: .
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: 'Deploy to Azure Web App (Staging)'
+      - name: "Deploy to Azure Web App (Staging)"
         if: needs.prepare.outputs.is-staging == 'true'
         id: deploy-to-webapp-staging
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'staging-iestagram'  # Staging backend app name
+          app-name: "staging-iestagram" # Staging backend app name
           package: .
+          startup-command: "npm start"
 
-      - name: 'Deploy to Azure Web App (Production)'
+      - name: "Wait for any ongoing deployments to complete"
+        if: needs.prepare.outputs.is-production == 'true'
+        run: |
+          echo "Checking for ongoing deployments..."
+          sleep 10
+          echo "Proceeding with deployment..."
+
+      - name: "Deploy to Azure Web App (Production)"
         if: needs.prepare.outputs.is-production == 'true'
         id: deploy-to-webapp-production
+        continue-on-error: false
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'IEstagram'
-          slot-name: 'Production'
+          app-name: "IEstagram"
           package: .
+          startup-command: "npm start"
+          # Note: Removed slot-name as default production slot doesn't need it
+          # If you have a deployment slot named 'Production', uncomment the line below:
+          # slot-name: 'Production'
 
       - name: Record deployment
         run: |
@@ -274,8 +287,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
-          cache: 'npm'
+          node-version: "20.x"
+          cache: "npm"
 
       - name: Wait for backend to be ready
         run: |
@@ -458,7 +471,7 @@ jobs:
           echo "| Deploy Frontend | ${{ needs.deploy-frontend.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Smoke Tests | ${{ needs.smoke-tests.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           # Determine overall status
           if [ "${{ needs.test.result }}" != "success" ]; then
             echo "### ❌ Pipeline Failed: Tests" >> $GITHUB_STEP_SUMMARY
@@ -481,4 +494,3 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "Some stages were skipped or did not run." >> $GITHUB_STEP_SUMMARY
           fi
-
